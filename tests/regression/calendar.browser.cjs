@@ -21,15 +21,18 @@ const activeHtml = execFileSync(php, [fixture, '--render-calendar-fixture', 'act
 const common = fs.readFileSync(path.join(glpi, 'js/common.js'), 'utf8');
 const localeHelper = common.match(/function getFlatPickerLocale\(language, region\) \{[\s\S]*?\n\}/);
 assert.ok(localeHelper, 'GLPI locale helper not found');
+const submitHelper = common.match(/function blockFormSubmit\(form, e\) \{[\s\S]*?\n\}\n\n\$\(\(\) => \{[\s\S]*?\n\}\);/);
+assert.ok(submitHelper, 'GLPI submit-once helper not found');
 const assets = {
     '/assets/jquery.js': fs.readFileSync(require.resolve('jquery/dist/jquery.min.js')),
     '/assets/flatpickr.js': fs.readFileSync(require.resolve('flatpickr/dist/flatpickr.min.js')),
     '/assets/flatpickr.css': fs.readFileSync(require.resolve('flatpickr/dist/flatpickr.min.css')),
     '/assets/pt.js': fs.readFileSync(require.resolve('flatpickr/dist/l10n/pt.js')),
-    '/assets/glpi-calendar.js': 'window.__ = message => message;\n' + localeHelper[0] + '\n'
+    '/assets/glpi-calendar.js': 'window.__ = message => message;\n' + localeHelper[0] + '\n' + submitHelper[0] + '\n'
         + fs.readFileSync(path.join(glpi, 'js/flatpickr_buttons_plugin.js'), 'utf8'),
 };
 const submitted = [];
+const previews = [];
 const server = http.createServer(async (req, res) => {
     if (assets[req.url]) {
         res.writeHead(200, { 'Content-Type': req.url.endsWith('.css') ? 'text/css' : 'application/javascript' });
@@ -42,7 +45,16 @@ const server = http.createServer(async (req, res) => {
         const fields = Object.fromEntries(new URLSearchParams(body));
         try {
             assert.equal(fields._glpi_csrf_token, 'test-token');
-            const result = fields.add_manual !== undefined
+            if (fields.preview_delete === '1') {
+                const confirmation = execFileSync(php, [fixture, '--render-delete-fixture', body], { encoding: 'utf8' });
+                previews.push(fields);
+                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+                res.end(confirmation);
+                return;
+            }
+            const result = fields.confirm_delete === '1'
+                ? JSON.parse(execFileSync(php, [fixture, '--apply-delete-fixture', body], { encoding: 'utf8' }))
+                : fields.add_manual !== undefined
                 ? JSON.parse(execFileSync(php, [
                     fixture, '--validate-calendar-values', fields.manual_begin, fields.manual_end,
                 ], { encoding: 'utf8' }))
@@ -59,7 +71,9 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(req.url.startsWith('/editor')
+    res.end(req.url.includes('/ajax/changetimer.php')
+        ? html
+        : req.url.startsWith('/editor')
         ? (req.url.includes('active=1') ? activeHtml : html)
         : '<!doctype html><html lang="pt-BR"><body><iframe title="Timer editor" src="/editor'
             + (req.url === '/active' ? '?active=1' : '') + '" style="width:100%;height:600px"></iframe></body></html>');
@@ -138,6 +152,7 @@ const server = http.createServer(async (req, res) => {
         const runningBegin = editor.locator('[name="actual_begin[1]"]');
         const runningVisible = runningBegin.locator('..').locator('input[type="text"]');
         await runningVisible.waitFor({ state: 'visible' });
+        assert.equal(await editor.locator('button[name="preview_delete"]').count(), 0);
         assert.equal(await editor.locator('[name="actual_end[1]"]').getAttribute('type'), 'hidden');
         await runningBegin.locator('..').locator('[data-toggle]').click();
         await editor.locator('.flatpickr-calendar.open').waitFor({ state: 'visible' });
@@ -153,8 +168,36 @@ const server = http.createServer(async (req, res) => {
         assert.equal(submitted[2].result.timers[0].actual_actiontime, 0);
         assert.equal(submitted[2].result.task.state, 1);
         assert.match(submitted[2].result.history.at(-1).changes[2], /2025-01-10 08:00:00 \/ In progress -> 2025-01-10 07:45:00 \/ In progress/);
+
+        await page.goto(url);
+        editor = page.frameLocator('iframe');
+        const unsavedBegin = editor.locator('[name="actual_begin[1]"]').locator('..').locator('input[type="text"]');
+        await unsavedBegin.fill('');
+        await unsavedBegin.press('Enter');
+        assert.equal(await unsavedBegin.evaluate(input => input.checkValidity()), false);
+        await editor.locator('button[name="preview_delete"]').click();
+        await editor.locator('[data-actualtime-delete-confirmation]').waitFor({ state: 'visible' });
+        assert.equal(previews.length, 1);
+        assert.equal(previews[0]['actual_begin[1]'], undefined, 'Deletion does not submit unsaved edit inputs');
+        assert.equal(previews[0].original_begin, '2025-01-10 08:00:00');
+        assert.equal(submitted.length, 3, 'Preview does not delete');
+        assert.match(await editor.locator('body').innerText(), /2025-01-10 08:00:00/);
+        await editor.locator('[data-actualtime-delete-cancel]').click();
+        await editor.locator('[name="actual_begin[1]"]').waitFor({ state: 'attached' });
+        assert.equal(submitted.length, 3, 'Cancel does not delete');
+        await editor.locator('button[name="preview_delete"]').click();
+        await editor.locator('[data-actualtime-delete-confirmation]').waitFor({ state: 'visible' });
+        await editor.locator('button[name="confirm_delete"]').click();
+        await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body?.textContent?.includes('Saved fixture'));
+        assert.equal(previews.length, 2);
+        assert.equal(submitted.length, 4);
+        assert.equal(submitted[3].result.deleted, 1);
+        assert.deepEqual(submitted[3].result.timers, []);
+        assert.equal(submitted[3].result.task.actiontime, 0);
+        assert.equal(submitted[3].result.task.state, 1);
+        assert.match(submitted[3].result.history.at(-1).changes[2], /Deleted timer #1.*1800 seconds/);
         assert.deepEqual(errors, []);
-        console.log('OK: original GLPI calendars submit creation dates and save completed/running edits through the plugin PHP methods inside an iframe.');
+        console.log('OK: original GLPI calendars, completed/running edits and separate deletion confirmation/cancel/save work inside an iframe.');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

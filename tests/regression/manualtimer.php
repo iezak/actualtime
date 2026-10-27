@@ -19,6 +19,7 @@ set_error_handler(static function ($severity, $message, $file, $line) {
 function __($message, $domain = null) { return $message; }
 function __s($message, $domain = null) { return htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); }
 function _x($context, $message) { return $message; }
+function _n($singular, $plural, $count, $domain = null) { return $count == 1 ? $singular : $plural; }
 function getUserName($id) { return $GLOBALS['actualtime_test_user_name'] ?? ('Technician ' . $id); }
 function getItemForItemtype($type) { return new $type(); }
 function getForeignKeyFieldForItemType($type) { return strtolower($type) . 's_id'; }
@@ -41,6 +42,10 @@ class Toolbox
 {
     public static function getDateFormat($format) { return 'd/m/Y'; }
     public static function logInFile($name, $message) {}
+    public static function getTimestampTimeUnits($time) {
+        return ['day' => intdiv((int)$time, 86400), 'hour' => intdiv((int)$time % 86400, 3600),
+            'minute' => intdiv((int)$time % 3600, 60), 'second' => (int)$time % 60];
+    }
 }
 if (getenv('ACTUALTIME_GLPI_CORE')) {
     // Use GLPI's real HTML helpers without bootstrapping a database/session.
@@ -136,6 +141,10 @@ class MemoryDB
     public $failInsert = false;
     public $failSource = false;
     public $failTimerUpdate = false;
+    public $failTimerDelete = false;
+    public $failSourceDelete = false;
+    public $skipTimerDelete = false;
+    public $failCommit = false;
     public $failLock = false;
     public $transaction = false;
     public $beginCount = 0;
@@ -150,7 +159,12 @@ class MemoryDB
         $this->snapshot = [$this->timers, $this->sources, CommonDBTM::$records, Log::$entries];
         return $this->transaction = true;
     }
-    public function commit() { ++$this->commitCount; $this->transaction = false; return true; }
+    public function commit() {
+        ++$this->commitCount;
+        if ($this->failCommit) { return false; }
+        $this->transaction = false;
+        return true;
+    }
     public function rollBack() {
         [$this->timers, $this->sources, CommonDBTM::$records, Log::$entries] = $this->snapshot;
         $this->transaction = false;
@@ -186,7 +200,18 @@ class MemoryDB
         return true;
     }
     public function delete($table, $where) {
-        $this->timers = array_values(array_filter($this->timers, fn($row) => !$this->matches($row, $where)));
+        $this->affected = 0;
+        if ($table === PluginActualtimeSourcetimer::getTable()) {
+            if ($this->failSourceDelete) { return false; }
+            $property = 'sources';
+        } else {
+            if ($this->failTimerDelete) { return false; }
+            if ($this->skipTimerDelete) { return true; }
+            $property = 'timers';
+        }
+        $before = count($this->$property);
+        $this->$property = array_values(array_filter($this->$property, fn($row) => !$this->matches($row, $where)));
+        $this->affected = $before - count($this->$property);
         return true;
     }
     private function matches($row, $conditions) {
@@ -279,6 +304,36 @@ function editFixtureInput(): array {
         }
     }
     return $input;
+}
+function deleteFixtureInput($id = 1): array {
+    global $DB;
+    foreach ($DB->timers as $row) {
+        if ($row['id'] != $id) { continue; }
+        return ['timer_id' => (string)$id, 'original_begin' => (string)$row['actual_begin'],
+            'original_end' => (string)$row['actual_end'], 'original_actiontime' => (string)$row['actual_actiontime'],
+            'original_users_id' => (string)$row['users_id'], 'confirm_delete' => '1'];
+    }
+    throw new RuntimeException('Fixture timer not found');
+}
+
+if (($argv[1] ?? '') === '--render-delete-fixture') {
+    resetFixture();
+    addPeriod();
+    parse_str($argv[2] ?? '', $input);
+    $preview = PluginActualtimeManualtimer::deletionPreview(TicketTask::class, 10, $input);
+    echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"></head><body>';
+    PluginActualtimeSourcetimer::deletionForm(TicketTask::class, 10, $preview['timer']);
+    echo '</body></html>';
+    exit;
+}
+if (($argv[1] ?? '') === '--apply-delete-fixture') {
+    resetFixture();
+    addPeriod();
+    parse_str($argv[2] ?? '', $input);
+    $deleted = PluginActualtimeManualtimer::deleteTimer(TicketTask::class, 10, $input);
+    echo json_encode(['deleted' => $deleted, 'timers' => $DB->timers, 'sources' => $DB->sources, 'history' => Log::$entries,
+        'task' => CommonDBTM::$records[TicketTask::class][10]]);
+    exit;
 }
 
 if (($argv[1] ?? '') === '--render-calendar-fixture') {
@@ -436,7 +491,7 @@ ob_start();
 $html = ob_get_clean();
 check(str_contains($html, 'actual_end['), 'Existing timer editor retained');
 check(substr_count($html, 'data-input') === 4 && str_contains($html, '2025-01-10 08:30:00'), 'Existing start and end dates use the original GLPI calendar');
-check(substr_count($html, '<form ') === 2 && substr_count($html, '</form>') === 2, 'Separate balanced forms');
+check(substr_count($html, '<form ') === 3 && substr_count($html, '</form>') === 3, 'Creation, editing and deletion have separate balanced forms');
 check(substr_count($html, '<div') === substr_count($html, '</div>'), 'Balanced layout containers');
 
 resetFixture();

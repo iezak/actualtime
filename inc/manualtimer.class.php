@@ -67,7 +67,7 @@ class PluginActualtimeManualtimer
         return $task;
     }
 
-    /** Shared task lock for edits and native start/pause/stop operations. */
+    /** Shared task lock for timer changes and native start/pause/stop operations. */
     public static function withTaskLock($itemtype, $items_id, callable $operation)
     {
         global $DB;
@@ -115,6 +115,75 @@ class PluginActualtimeManualtimer
         ])) {
             throw new RuntimeException(__('Could not update the task duration.', 'actualtime'));
         }
+    }
+
+    /** Check the saved period shown by the editor or confirmation screen. */
+    public static function deletionPreview($itemtype, $items_id, array $input): array
+    {
+        global $DB;
+        $task = self::getEditableTask($itemtype, $items_id);
+        $timer_id = $input['timer_id'] ?? null;
+        if (filter_var($timer_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            throw new InvalidArgumentException(__('One of the timers is unavailable. Reopen the editor.', 'actualtime'));
+        }
+        $timer = $DB->request([
+            'FROM' => PluginActualtimeTask::getTable(),
+            'WHERE' => ['id' => (int)$timer_id, 'itemtype' => $itemtype, 'items_id' => (int)$items_id],
+            'LIMIT' => 1,
+        ])->current();
+        if (!$timer || $timer['actual_begin'] === null) {
+            throw new InvalidArgumentException(__('One of the timers is unavailable. Reopen the editor.', 'actualtime'));
+        }
+        if ($timer['actual_end'] === null) {
+            throw new InvalidArgumentException(__('Pause the running timer before deleting this entry.', 'actualtime'));
+        }
+        foreach (['begin', 'end', 'actiontime', 'users_id'] as $field) {
+            $column = $field === 'users_id' ? $field : 'actual_' . $field;
+            $original = $input['original_' . $field] ?? null;
+            if (!is_string($original) || $original !== (string)$timer[$column]) {
+                throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+            }
+        }
+        return ['task' => $task, 'timer' => $timer];
+    }
+
+    /** Delete only the confirmed saved period; totals and audit are atomic. */
+    public static function deleteTimer($itemtype, $items_id, array $input): int
+    {
+        global $DB;
+        self::getEditableTask($itemtype, $items_id);
+        if (($input['confirm_delete'] ?? null) !== '1') {
+            throw new InvalidArgumentException(__('Confirm the timer deletion before continuing.', 'actualtime'));
+        }
+        return self::withTaskLock($itemtype, $items_id, static function () use ($itemtype, $items_id, $input, $DB) {
+            ['task' => $task, 'timer' => $timer] = self::deletionPreview($itemtype, $items_id, $input);
+            $id = (int)$timer['id'];
+            if (!$DB->delete(PluginActualtimeTask::getTable(), [
+                'id' => $id, 'itemtype' => $itemtype, 'items_id' => (int)$items_id,
+                'actual_begin' => $timer['actual_begin'], 'actual_end' => $timer['actual_end'],
+                'actual_actiontime' => $timer['actual_actiontime'], 'users_id' => $timer['users_id'],
+            ])) {
+                throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
+            }
+            if ($DB->affectedRows() !== 1) {
+                throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+            }
+            if (!$DB->delete(PluginActualtimeSourcetimer::getTable(), ['plugin_actualtime_tasks_id' => $id])) {
+                throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
+            }
+            self::updateDuration($task);
+            $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
+            $parent = new $parent_type();
+            $message = sprintf(
+                __('Deleted timer #%1$d, task #%2$d, technician #%3$d: %4$s - %5$s (%6$d seconds).', 'actualtime'),
+                $id, $items_id, $timer['users_id'], $timer['actual_begin'], $timer['actual_end'], $timer['actual_actiontime']
+            );
+            if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+                [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
+                throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
+            }
+            return $id;
+        });
     }
 
     /** Validate the whole batch before changing any timer. */

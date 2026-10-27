@@ -20,6 +20,34 @@ msgstr "Informe o início e o término do período trabalhado."
 msgid "Existing timers"
 msgstr "Apontamentos existentes"
 
+msgid "Delete timer"
+msgstr "Excluir apontamento"
+
+msgid "Permanently delete this timer? Its dates and duration will remain in the item history."
+msgstr "Excluir definitivamente este apontamento? Os horários e a duração permanecerão no histórico do item."
+
+msgid "Confirm deletion"
+msgstr "Confirmar exclusão"
+
+msgid "Pause the running timer before deleting this entry."
+msgstr "Pause o cronômetro ativo antes de excluir este apontamento."
+
+msgid "Confirm the timer deletion before continuing."
+msgstr "Confirme a exclusão do apontamento antes de continuar."
+
+msgid "Timer deleted."
+msgstr "Apontamento excluído."
+
+msgid "Could not delete the timer."
+msgstr "Não foi possível excluir o apontamento."
+
+msgid "Could not delete the timer. No changes were saved."
+msgstr "Não foi possível excluir o apontamento. Nenhuma alteração foi salva."
+
+#, php-format
+msgid "Deleted timer #%1$d, task #%2$d, technician #%3$d: %4$s - %5$s (%6$d seconds)."
+msgstr "Apontamento excluído #%1$d, tarefa #%2$d, técnico #%3$d: %4$s - %5$s (%6$d segundos)."
+
 msgid "Edit start and end dates. For a running timer, only the start can be changed."
 msgstr "Edite o início e o término. Em um cronômetro ativo, somente o início pode ser alterado."
 
