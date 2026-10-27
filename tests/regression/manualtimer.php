@@ -16,6 +16,7 @@ set_error_handler(static function ($severity, $message, $file, $line) {
 });
 
 function __($message, $domain = null) { return $message; }
+function __s($message, $domain = null) { return htmlspecialchars($message, ENT_QUOTES, 'UTF-8'); }
 function _x($context, $message) { return $message; }
 function getUserName($id) { return $GLOBALS['actualtime_test_user_name'] ?? ('Technician ' . $id); }
 function getItemForItemtype($type) { return new $type(); }
@@ -34,6 +35,10 @@ class Plugin
     public function isActivated($name) { return self::$active; }
     public static function getWebDir($name) { return '/plugins/' . $name; }
 }
+class Toolbox
+{
+    public static function getDateFormat($format) { return 'd/m/Y'; }
+}
 if (getenv('ACTUALTIME_GLPI_CORE')) {
     // Use GLPI's real HTML helpers without bootstrapping a database/session.
     require rtrim(getenv('ACTUALTIME_GLPI_CORE'), '/') . '/src/Html.php';
@@ -44,6 +49,12 @@ if (getenv('ACTUALTIME_GLPI_CORE')) {
         public static function hidden($name, $options) {
             return '<input type="hidden" name="' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8')
                 . '" value="' . htmlspecialchars((string)$options['value'], ENT_QUOTES, 'UTF-8') . '">';
+        }
+        public static function showDateTimeField($name, $options) {
+            echo '<div class="input-group flex-grow-1 flatpickr"><input type="text" data-input name="'
+                . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . '" value="'
+                . htmlspecialchars($options['value'], ENT_QUOTES, 'UTF-8') . '"'
+                . ($options['required'] ? ' required' : '') . '></div>';
         }
         public static function closeForm() {
             echo '<input name="_glpi_csrf_token" value="test-token"></form>';
@@ -184,7 +195,7 @@ function resetFixture() {
     global $DB, $CFG_GLPI;
     $DB = new MemoryDB();
     $CFG_GLPI = ['time_step' => 15];
-    $_SESSION = [];
+    $_SESSION = ['glpilanguage' => 'pt_BR', 'glpidate_format' => 0];
     unset($GLOBALS['actualtime_test_user_name']);
     Session::$right = true;
     Session::$user = 7;
@@ -209,9 +220,14 @@ if (($argv[1] ?? '') === '--render-calendar-fixture') {
     resetFixture();
     addPeriod();
     echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">';
-    echo '<style>body{font:16px sans-serif;padding:16px}label{display:block}input{padding:8px;max-width:100%}.mb-3{margin-bottom:12px}.flatpickr-calendar{display:none!important}</style>';
+    echo '<link rel="stylesheet" href="/assets/flatpickr.css">';
+    echo '<style>body{font:16px sans-serif;padding:16px}label{display:block}input{padding:8px;max-width:100%}.mb-3{margin-bottom:12px}[data-toggle]{display:inline-block;min-width:24px;min-height:24px;cursor:pointer}[data-toggle]::before{content:"▦"}</style>';
+    echo '<script src="/assets/jquery.js"></script>';
     echo '</head><body>';
     (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+    // Match the popup lifecycle: deferred calendar dependencies load in the footer.
+    echo '<script src="/assets/flatpickr.js"></script><script src="/assets/pt.js"></script>';
+    echo '<script src="/assets/glpi-calendar.js"></script>';
     echo '</body></html>';
     exit;
 }
@@ -335,8 +351,8 @@ ob_start();
 $html = ob_get_clean();
 check(str_contains($html, 'manual_begin') && str_contains($html, 'manual_end'), 'Creation form exists without old timers');
 check(str_contains($html, "name='add_manual'"), 'Rendering reaches the submit button');
-check(substr_count($html, 'type="datetime-local"') === 2 && !str_contains($html, 'flatpickr'), 'Creation controls do not depend on calendar JavaScript');
-check(substr_count($html, 'step="1"') === 2 && substr_count($html, ' required') === 2, 'Creation controls keep seconds and required validation');
+check(substr_count($html, 'data-input') === 2 && !str_contains($html, 'type="datetime-local"'), 'Creation uses the original GLPI calendar');
+check(substr_count($html, ' required') === 2, 'Creation calendars keep required validation');
 check(str_contains($html, '_glpi_csrf_token') && str_contains($html, 'data-submit-once'), 'CSRF and submit-once markup');
 check(substr_count($html, '<form ') === substr_count($html, '</form>'), 'Balanced forms without timers');
 addPeriod();
@@ -344,7 +360,7 @@ ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
 check(str_contains($html, 'actual_end['), 'Existing timer editor retained');
-check(substr_count($html, 'type="datetime-local"') === 3 && str_contains($html, '2025-01-10T08:30:00'), 'Existing end date uses a native control');
+check(substr_count($html, 'data-input') === 3 && str_contains($html, '2025-01-10 08:30:00'), 'Existing end date uses the original GLPI calendar');
 check(substr_count($html, '<form ') === 2 && substr_count($html, '</form>') === 2, 'Separate balanced forms');
 check(substr_count($html, '<div') === substr_count($html, '</div>'), 'Balanced layout containers');
 
@@ -356,7 +372,7 @@ $_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10] = [
 ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
-check(str_contains($html, '2025-01-10T08:30:00') && str_contains($html, '2025-01-10T08:00:00'), 'Rejected dates repopulate native controls');
+check(str_contains($html, '2025-01-10 08:30:00') && str_contains($html, '2025-01-10 08:00:00'), 'Rejected dates repopulate GLPI calendars');
 check(!isset($_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10]), 'Form state is consumed per task');
 resetFixture();
 $GLOBALS['actualtime_test_user_name'] = '<img src=x onerror="alert(1)"> & Técnico';
