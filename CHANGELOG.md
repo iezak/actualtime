@@ -1,5 +1,14 @@
 # Actualtime
 
+## [3.2.1-london.3] - 2026-10-27
+
+### Fixed
+
+- Replace calls to the unavailable global htmlescape() with PHP's
+  htmlspecialchars(), keeping attribute and technician-name escaping.
+- Remove the test-only global that masked the GLPI 10 rendering error. Add a
+  mode that uses the real Html class from GLPI 10 without bootstrapping a database.
+
 ## [3.2.1-london.2] - 2026-10-27
 
 ### Fixed

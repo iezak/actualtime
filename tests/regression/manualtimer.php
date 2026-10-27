@@ -9,6 +9,7 @@
 define('GLPI_ROOT', dirname(__DIR__, 2));
 define('READ', 1);
 define('MINUTE_TIMESTAMP', 60);
+define('GLPI_USE_CSRF_CHECK', true);
 date_default_timezone_set('America/Sao_Paulo');
 set_error_handler(static function ($severity, $message, $file, $line) {
     throw new ErrorException($message, 0, $severity, $file, $line);
@@ -16,8 +17,7 @@ set_error_handler(static function ($severity, $message, $file, $line) {
 
 function __($message, $domain = null) { return $message; }
 function _x($context, $message) { return $message; }
-function htmlescape($value) { return htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); }
-function getUserName($id) { return 'Technician ' . $id; }
+function getUserName($id) { return $GLOBALS['actualtime_test_user_name'] ?? ('Technician ' . $id); }
 function getItemForItemtype($type) { return new $type(); }
 
 class Session
@@ -26,6 +26,7 @@ class Session
     public static $right = true;
     public static function getLoginUserID() { return self::$user; }
     public static function haveRight($name, $right) { return self::$right; }
+    public static function getNewCSRFToken() { return 'test-token'; }
 }
 class Plugin
 {
@@ -33,17 +34,20 @@ class Plugin
     public function isActivated($name) { return self::$active; }
     public static function getWebDir($name) { return '/plugins/' . $name; }
 }
-class Html
-{
-    public static function cleanId($value) { return str_replace(['[', ']'], '_', $value); }
-    public static function hidden($name, $options) {
-        return '<input type="hidden" name="' . htmlescape($name) . '" value="' . htmlescape($options['value']) . '">';
-    }
-    public static function showDateTimeField($name, $options) {
-        echo '<input name="' . htmlescape($name) . '" value="' . htmlescape($options['value']) . '">';
-    }
-    public static function closeForm() {
-        echo '<input name="_glpi_csrf_token" value="test-token"></form>';
+if (getenv('ACTUALTIME_GLPI_CORE')) {
+    // Use GLPI's real HTML helpers without bootstrapping a database/session.
+    require rtrim(getenv('ACTUALTIME_GLPI_CORE'), '/') . '/src/Html.php';
+} else {
+    class Html
+    {
+        public static function cleanId($value) { return str_replace(['[', ']'], '_', $value); }
+        public static function hidden($name, $options) {
+            return '<input type="hidden" name="' . htmlspecialchars($name, ENT_QUOTES, 'UTF-8')
+                . '" value="' . htmlspecialchars((string)$options['value'], ENT_QUOTES, 'UTF-8') . '">';
+        }
+        public static function closeForm() {
+            echo '<input name="_glpi_csrf_token" value="test-token"></form>';
+        }
     }
 }
 class CommonDBTM
@@ -181,6 +185,7 @@ function resetFixture() {
     $DB = new MemoryDB();
     $CFG_GLPI = ['time_step' => 15];
     $_SESSION = [];
+    unset($GLOBALS['actualtime_test_user_name']);
     Session::$right = true;
     Session::$user = 7;
     Plugin::$active = true;
@@ -217,6 +222,7 @@ if (($argv[1] ?? '') === '--validate-calendar-values') {
 }
 
 resetFixture();
+check(!function_exists('htmlescape'), 'Do not invent a global helper unavailable in GLPI 10');
 $interval = PluginActualtimeManualtimer::validateInterval('2024-02-29 23:45:00', '2024-03-01 00:15:00');
 check($interval['actual_actiontime'] === 1800, 'Leap day and midnight duration');
 check(PluginActualtimeManualtimer::validateInterval('2025-01-10 08:00:01', '2025-01-10 08:00:02')['actual_actiontime'] === 1, 'Seconds retained');
@@ -328,6 +334,7 @@ ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
 check(str_contains($html, 'manual_begin') && str_contains($html, 'manual_end'), 'Creation form exists without old timers');
+check(str_contains($html, "name='add_manual'"), 'Rendering reaches the submit button');
 check(substr_count($html, 'type="datetime-local"') === 2 && !str_contains($html, 'flatpickr'), 'Creation controls do not depend on calendar JavaScript');
 check(substr_count($html, 'step="1"') === 2 && substr_count($html, ' required') === 2, 'Creation controls keep seconds and required validation');
 check(str_contains($html, '_glpi_csrf_token') && str_contains($html, 'data-submit-once'), 'CSRF and submit-once markup');
@@ -351,6 +358,12 @@ ob_start();
 $html = ob_get_clean();
 check(str_contains($html, '2025-01-10T08:30:00') && str_contains($html, '2025-01-10T08:00:00'), 'Rejected dates repopulate native controls');
 check(!isset($_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10]), 'Form state is consumed per task');
+resetFixture();
+$GLOBALS['actualtime_test_user_name'] = '<img src=x onerror="alert(1)"> & Técnico';
+ob_start();
+(new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+$html = ob_get_clean();
+check(str_contains($html, '&lt;img') && str_contains($html, '&amp; Técnico') && !str_contains($html, '<img'), 'Technician name remains escaped without framework globals');
 foreach ([ChangeTask::class => Change::class, ProblemTask::class => Problem::class] as $taskType => $parentType) {
     resetFixture();
     CommonDBTM::$records[$parentType] = [1 => ['id' => 1, 'status' => 2]];

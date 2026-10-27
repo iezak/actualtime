@@ -1,6 +1,6 @@
 # ActualTime London — etapa 1
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.1-london.2**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.1-london.3**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -15,6 +15,10 @@ A revisão **london.2** usa o calendário nativo do navegador para início, tér
 e edição do término existente. A seleção deixa de depender da inicialização do
 Flatpickr dentro da janela. Os valores continuam sendo validados no servidor,
 com precisão de segundos e no mesmo fuso usado pelo GLPI.
+
+A revisão **london.3** corrige a interrupção do formulário logo após “Data
+inicial”: a saída HTML usa a função nativa do PHP, sem depender de um helper
+global ausente no GLPI 10. Os testes não definem mais esse helper artificialmente.
 
 O tempo é atribuído ao técnico responsável pela tarefa. Se não houver técnico
 individual (ou em tarefas de projeto), é atribuído ao usuário que faz o lançamento.
@@ -50,7 +54,7 @@ da tarefa evita duplicatas em envios manuais simultâneos.
    no diretório de plugins utilizado pela sua instalação.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI e confirme a versão **3.2.1-london.2**.
+5. Limpe o cache do GLPI e confirme a versão **3.2.1-london.3**.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
 
@@ -98,10 +102,18 @@ Executar na raiz do plugin com PHP 8.1 ou posterior:
 
     php tests/regression/manualtimer.php
 
+Para testar com a classe Html real do GLPI 10.0.26, informe a raiz de uma cópia
+desse código. O teste importa somente src/Html.php; não inicia o GLPI nem acessa
+o banco real:
+
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/manualtimer.php
+
 Com Playwright/Chromium disponíveis, o teste de navegador abre o calendário
 nativo em uma janela com iframe e envia os formulários de criação e edição:
 
     node tests/regression/calendar.browser.cjs
+
+A variável ACTUALTIME_GLPI_CORE também pode ser usada nesse teste de navegador.
 
 Os testes executam o código do plugin com adaptadores em memória para os serviços
 do GLPI. Cobrem datas, autorização, persistência, arredondamento, duplicatas,
