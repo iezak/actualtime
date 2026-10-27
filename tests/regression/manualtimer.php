@@ -1,0 +1,336 @@
+<?php
+
+/**
+ * Isolated regressions: execute the real plugin classes with GLPI adapters.
+ * Run: php tests/regression/manualtimer.php
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+
+define('GLPI_ROOT', dirname(__DIR__, 2));
+define('READ', 1);
+define('MINUTE_TIMESTAMP', 60);
+date_default_timezone_set('America/Sao_Paulo');
+set_error_handler(static function ($severity, $message, $file, $line) {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
+function __($message, $domain = null) { return $message; }
+function _x($context, $message) { return $message; }
+function htmlescape($value) { return htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); }
+function getUserName($id) { return 'Technician ' . $id; }
+function getItemForItemtype($type) { return new $type(); }
+
+class Session
+{
+    public static $user = 7;
+    public static $right = true;
+    public static function getLoginUserID() { return self::$user; }
+    public static function haveRight($name, $right) { return self::$right; }
+}
+class Plugin
+{
+    public static $active = true;
+    public function isActivated($name) { return self::$active; }
+    public static function getWebDir($name) { return '/plugins/' . $name; }
+}
+class Html
+{
+    public static function hidden($name, $options) {
+        return '<input type="hidden" name="' . htmlescape($name) . '" value="' . htmlescape($options['value']) . '">';
+    }
+    public static function showDateTimeField($name, $options) {
+        echo '<input name="' . htmlescape($name) . '" value="' . htmlescape($options['value']) . '">';
+    }
+    public static function closeForm() {
+        echo '<input name="_glpi_csrf_token" value="test-token"></form>';
+    }
+}
+class CommonDBTM
+{
+    public $fields = [];
+    public static $records = [];
+    public static $denied = [];
+    public static $failUpdate = false;
+    public function getFromDB($id) {
+        $this->fields = self::$records[static::class][(int)$id] ?? [];
+        return !empty($this->fields);
+    }
+    public function can($id, $right) {
+        return $this->getFromDB($id) && !in_array(static::class . ':' . $id, self::$denied, true);
+    }
+    public function getField($name) { return $this->fields[$name] ?? null; }
+    public function getID() { return $this->fields['id']; }
+    public static function getTable() {
+        return static::class === PluginActualtimeTask::class
+            ? 'glpi_plugin_actualtime_tasks'
+            : 'glpi_' . strtolower(static::class) . 's';
+    }
+    public function getForeignKeyField() { return strtolower(static::class) . 's_id'; }
+    public function getItilObjectItemType() { return str_replace('Task', '', static::class); }
+    public function getFormURL() { return '/plugins/actualtime/front/sourcetimer.form.php'; }
+    public function update($input) {
+        if (self::$failUpdate) {
+            return false;
+        }
+        self::$records[static::class][$input['id']] = array_merge($this->fields, $input);
+        $this->fields = self::$records[static::class][$input['id']];
+        return true;
+    }
+}
+class CommonITILObject extends CommonDBTM { public const SOLVED = 5; }
+class Ticket extends CommonITILObject {}
+class Change extends CommonITILObject {}
+class Problem extends CommonITILObject {}
+class Project extends CommonDBTM {}
+class TicketTask extends CommonDBTM {}
+class ChangeTask extends CommonDBTM {}
+class ProblemTask extends CommonDBTM {}
+class ProjectTask extends CommonDBTM {}
+class ProjectState extends CommonDBTM {}
+class Log
+{
+    public const HISTORY_LOG_SIMPLE_MESSAGE = 12;
+    public static $entries = [];
+    public static $fail = false;
+    public static function history($id, $type, $changes, $link = '', $action = 0) {
+        if (self::$fail) { return false; }
+        self::$entries[] = compact('id', 'type', 'changes', 'action') + ['actor' => Session::$user];
+        return true;
+    }
+}
+
+class MemoryDB
+{
+    public $timers = [];
+    public $failInsert = false;
+    public $failLock = false;
+    public $transaction = false;
+    private $snapshot;
+    private $lastId = 0;
+    public function inTransaction() { return $this->transaction; }
+    public function beginTransaction() {
+        $this->snapshot = [$this->timers, CommonDBTM::$records, Log::$entries];
+        return $this->transaction = true;
+    }
+    public function commit() { $this->transaction = false; return true; }
+    public function rollBack() {
+        [$this->timers, CommonDBTM::$records, Log::$entries] = $this->snapshot;
+        $this->transaction = false;
+        return true;
+    }
+    public function query($sql) { return !$this->failLock; }
+    public function insertId() { return $this->lastId; }
+    public function tableExists($table) { return true; }
+    public function insert($table, $row) {
+        if ($this->failInsert) { return false; }
+        $row['id'] = ++$this->lastId;
+        $this->timers[] = $row;
+        return true;
+    }
+    private function matches($row, $conditions) {
+        foreach ($conditions as $field => $value) {
+            if (is_int($field)) {
+                if (!$this->matches($row, $value)) { return false; }
+            } elseif ($field === 'NOT') {
+                if ($this->matches($row, $value)) { return false; }
+            } elseif ($field === 'OR') {
+                $matches = false;
+                foreach ($value as $key => $candidate) {
+                    $matches = $matches || $this->matches($row, is_int($key) ? $candidate : [$key => $candidate]);
+                }
+                if (!$matches) { return false; }
+            } elseif (is_array($value)) {
+                $actual = $row[$field] ?? null;
+                if ($actual === null) { return false; }
+                if ($value[0] === '<' && !($actual < $value[1])) { return false; }
+                if ($value[0] === '>' && !($actual > $value[1])) { return false; }
+            } elseif (($row[$field] ?? null) != $value) {
+                return false;
+            }
+        }
+        return true;
+    }
+    public function request($query) {
+        $rows = $query['FROM'] === ProjectState::getTable() ? [['id' => 9, 'is_finished' => 1]] : $this->timers;
+        $rows = array_values(array_filter($rows, fn($row) => $this->matches($row, $query['WHERE'] ?? [])));
+        if (isset($query['LIMIT'])) { $rows = array_slice($rows, 0, $query['LIMIT']); }
+        return new ArrayIterator($rows);
+    }
+}
+
+// Load the real classes. Only configuration storage is adapted.
+require GLPI_ROOT . '/inc/task.class.php';
+require GLPI_ROOT . '/inc/sourcetimer.class.php';
+require GLPI_ROOT . '/inc/manualtimer.class.php';
+$checks = 0;
+function check($condition, $message) {
+    global $checks;
+    ++$checks;
+    if (!$condition) { throw new RuntimeException('FAIL: ' . $message); }
+}
+function rejects($callback, $message) {
+    try { $callback(); } catch (InvalidArgumentException | RuntimeException $error) {
+        check(true, $message);
+        return;
+    }
+    check(false, $message);
+}
+function resetFixture() {
+    global $DB, $CFG_GLPI;
+    $DB = new MemoryDB();
+    $CFG_GLPI = ['time_step' => 15];
+    $_SESSION = [];
+    Session::$right = true;
+    Session::$user = 7;
+    Plugin::$active = true;
+    CommonDBTM::$denied = [];
+    CommonDBTM::$failUpdate = false;
+    Log::$entries = [];
+    Log::$fail = false;
+    CommonDBTM::$records = [
+        PluginActualtimeConfig::class => [1 => ['id' => 1, 'autoupdate_duration' => true]],
+        Ticket::class => [1 => ['id' => 1, 'status' => 2, 'is_deleted' => 0]],
+        TicketTask::class => [10 => ['id' => 10, 'tickets_id' => 1, 'users_id_tech' => 42, 'state' => 1, 'actiontime' => 0]],
+        Project::class => [1 => ['id' => 1, 'is_deleted' => 0]],
+        ProjectTask::class => [10 => ['id' => 10, 'projects_id' => 1, 'projectstates_id' => 1, 'effective_duration' => 0]],
+    ];
+}
+function addPeriod($begin = '2025-01-10 08:00:00', $end = '2025-01-10 08:30:00', $type = TicketTask::class) {
+    return PluginActualtimeManualtimer::create($type, 10, $begin, $end);
+}
+
+resetFixture();
+$interval = PluginActualtimeManualtimer::validateInterval('2024-02-29 23:45:00', '2024-03-01 00:15:00');
+check($interval['actual_actiontime'] === 1800, 'Leap day and midnight duration');
+check(PluginActualtimeManualtimer::validateInterval('2025-01-10 08:00:01', '2025-01-10 08:00:02')['actual_actiontime'] === 1, 'Seconds retained');
+foreach ([
+    ['', '2025-01-10 08:30:00'],
+    [[], '2025-01-10 08:30:00'],
+    ['2025-02-29 08:00:00', '2025-03-01 08:30:00'],
+    ['2025-01-10 25:00:00', '2025-01-11 08:30:00'],
+    ['2025-01-10 08:00:00 trailing', '2025-01-10 08:30:00'],
+    ['2025-01-10 08:00:00', '2025-01-10 08:00:00'],
+    ['2025-01-10 08:30:00', '2025-01-10 08:00:00'],
+    ['1960-01-10 08:00:00', '1960-01-10 08:30:00'],
+    ['2099-01-10 08:00:00', '2099-01-10 08:30:00'],
+] as [$begin, $end]) {
+    rejects(fn() => PluginActualtimeManualtimer::validateInterval($begin, $end), 'Reject invalid date/range');
+}
+
+addPeriod();
+check(count($DB->timers) === 1 && $DB->timers[0]['actual_actiontime'] === 1800, 'Manual period persisted');
+check($DB->timers[0]['users_id'] === 42, 'Assigned technician receives time');
+check(CommonDBTM::$records[TicketTask::class][10]['state'] === 1, 'Task state retained');
+check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 1800, 'Native task duration updated');
+check(Log::$entries[0]['actor'] === 7 && Log::$entries[0]['id'] === 1, 'Operator audited on parent');
+check(str_contains(Log::$entries[0]['changes'][2], 'technician #42'), 'Technician audited');
+rejects(fn() => addPeriod(), 'Duplicate rejected');
+rejects(fn() => addPeriod('2025-01-10 08:15:00', '2025-01-10 08:35:00'), 'Overlapping interval rejected');
+check(count($DB->timers) === 1 && count(Log::$entries) === 1, 'Rejected requests leave no writes');
+addPeriod('2025-01-10 08:30:00', '2025-01-10 08:45:00');
+check(PluginActualtimeTask::totalEndTime(10, TicketTask::class) === 2700, 'Adjacent periods total 45 minutes');
+check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 2700, 'Accumulated duration updated');
+
+resetFixture();
+addPeriod('2025-01-10 08:00:00', '2025-01-10 08:07:00');
+check($DB->timers[0]['actual_actiontime'] === 420, 'Actual duration stays seven minutes');
+check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 900, 'Task duration follows 15 minute step');
+resetFixture();
+CommonDBTM::$records[PluginActualtimeConfig::class][1]['autoupdate_duration'] = false;
+addPeriod();
+check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 0, 'Auto update disabled is respected');
+resetFixture();
+$CFG_GLPI['time_step'] = 0;
+addPeriod();
+check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 1800, 'Invalid step does not divide by zero');
+
+foreach (['permission', 'private task', 'other entity', 'solved', 'closed', 'deleted', 'no login', 'inactive plugin'] as $case) {
+    resetFixture();
+    if ($case === 'permission') { Session::$right = false; }
+    if ($case === 'private task') { CommonDBTM::$denied = ['TicketTask:10']; }
+    if ($case === 'other entity') { CommonDBTM::$denied = ['Ticket:1']; }
+    if ($case === 'solved') { CommonDBTM::$records[Ticket::class][1]['status'] = 5; }
+    if ($case === 'closed') { CommonDBTM::$records[Ticket::class][1]['status'] = 6; }
+    if ($case === 'deleted') { CommonDBTM::$records[Ticket::class][1]['is_deleted'] = 1; }
+    if ($case === 'no login') { Session::$user = 0; }
+    if ($case === 'inactive plugin') { Plugin::$active = false; }
+    rejects(fn() => addPeriod(), 'Authorization: ' . $case);
+    check($DB->timers === [], 'Denied action has no writes');
+}
+resetFixture();
+foreach ([['UnexpectedClass', 10], [[], 10], [TicketTask::class, []], [TicketTask::class, -1], [TicketTask::class, 99]] as [$type, $id]) {
+    check(!PluginActualtimeSourcetimer::canModify($type, $id), 'Reject unsupported object or identifier');
+}
+resetFixture();
+addPeriod('2025-01-10 08:00:00', '2025-01-10 08:30:00', ProjectTask::class);
+check($DB->timers[0]['users_id'] === 7, 'Project uses current user');
+check(CommonDBTM::$records[ProjectTask::class][10]['effective_duration'] === 1800, 'Project duration updated');
+check(Log::$entries[0]['type'] === Project::class, 'Project receives audit');
+CommonDBTM::$records[ProjectTask::class][10]['projectstates_id'] = 9;
+rejects(fn() => addPeriod('2025-01-10 09:00:00', '2025-01-10 09:30:00', ProjectTask::class), 'Finished project task rejected');
+resetFixture();
+CommonDBTM::$records[TicketTask::class][10]['users_id_tech'] = 0;
+addPeriod();
+check($DB->timers[0]['users_id'] === 7, 'Unassigned task uses current user');
+
+foreach (['insert', 'duration', 'history', 'lock'] as $failure) {
+    resetFixture();
+    $before = CommonDBTM::$records;
+    if ($failure === 'insert') { $DB->failInsert = true; }
+    if ($failure === 'duration') { CommonDBTM::$failUpdate = true; }
+    if ($failure === 'history') { Log::$fail = true; }
+    if ($failure === 'lock') { $DB->failLock = true; }
+    rejects(fn() => addPeriod(), 'Failure: ' . $failure);
+    check($DB->timers === [] && Log::$entries === [] && CommonDBTM::$records === $before, 'Rollback: ' . $failure);
+    check(!$DB->inTransaction(), 'Transaction closed after error');
+}
+resetFixture();
+$DB->timers[] = [
+    'id' => 100, 'itemtype' => TicketTask::class, 'items_id' => 10, 'users_id' => 42,
+    'actual_begin' => '2025-01-10 09:00:00', 'actual_end' => null, 'actual_actiontime' => 0,
+];
+CommonDBTM::$records[PluginActualtimeConfig::class][1]['autoupdate_duration'] = false;
+rejects(fn() => addPeriod('2025-01-10 09:15:00', '2025-01-10 09:30:00'), 'Overlap with active timer rejected');
+addPeriod('2025-01-10 08:00:00', '2025-01-10 08:30:00');
+check($DB->timers[0]['actual_end'] === null, 'Past manual timer does not stop active timer');
+
+resetFixture();
+ob_start();
+(new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+$html = ob_get_clean();
+check(str_contains($html, 'manual_begin') && str_contains($html, 'manual_end'), 'Creation form exists without old timers');
+check(str_contains($html, '_glpi_csrf_token') && str_contains($html, 'data-submit-once'), 'CSRF and submit-once markup');
+check(substr_count($html, '<form ') === substr_count($html, '</form>'), 'Balanced forms without timers');
+addPeriod();
+ob_start();
+(new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+$html = ob_get_clean();
+check(str_contains($html, 'actual_end['), 'Existing timer editor retained');
+check(substr_count($html, '<form ') === 2 && substr_count($html, '</form>') === 2, 'Separate balanced forms');
+check(substr_count($html, '<div') === substr_count($html, '</div>'), 'Balanced layout containers');
+
+resetFixture();
+$_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10] = [
+    'manual_begin' => '2025-01-10 08:30:00',
+    'manual_end' => '2025-01-10 08:00:00',
+];
+ob_start();
+(new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+$html = ob_get_clean();
+check(str_contains($html, '2025-01-10 08:30:00') && str_contains($html, '2025-01-10 08:00:00'), 'Rejected dates repopulate the form');
+check(!isset($_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10]), 'Form state is consumed per task');
+foreach ([ChangeTask::class => Change::class, ProblemTask::class => Problem::class] as $taskType => $parentType) {
+    resetFixture();
+    CommonDBTM::$records[$parentType] = [1 => ['id' => 1, 'status' => 2]];
+    CommonDBTM::$records[$taskType] = [10 => [
+        'id' => 10,
+        strtolower($parentType) . 's_id' => 1,
+        'users_id_tech' => 42,
+        'state' => 1,
+        'actiontime' => 0,
+    ]];
+    addPeriod('2025-01-10 08:00:00', '2025-01-10 08:30:00', $taskType);
+    check(Log::$entries[0]['type'] === $parentType && $DB->timers[0]['actual_actiontime'] === 1800, 'Additional task type: ' . $taskType);
+}
+
+echo "OK: $checks regression checks (GLPI adapters, no real database).\n";

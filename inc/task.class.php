@@ -455,7 +455,7 @@ JAVASCRIPT;
                         || (Session::getCurrentInterface() == "central")
                         || $config->showInHelpdesk()
                     ) {
-                        if (PluginActualtimeSourcetimer::checkItemtypeRight($itemtype) && (countElementsInTable(PluginActualtimeTask::getTable(), ['items_id' => $task_id, 'itemtype' => $itemtype, 'NOT' => ['actual_end' => null]]) > 0) && PluginActualtimeSourcetimer::canModify($itemtype, $task_id)) {
+                        if (PluginActualtimeSourcetimer::canModify($itemtype, $task_id)) {
                             $html .= "<div class='dropdown ms-2'>";
                             $html .= "<a href='#' data-bs-toggle='modal' data-bs-target='#add_time_{$task_id}'>";
                             $html .= "<span class='fas fa-calendar-plus control_item' title='" . __("Modify timers", "actualtime") . "'></span>";

@@ -10,6 +10,47 @@ msgstr ""
 "X-Generator: Localazy (https://localazy.com)\n"
 "Plural-Forms: nplurals=2; plural=(n>=0 && n<=1) ? 0 : 1;\n"
 
+#. London fork: manual timer creation.
+msgid "Add a manual timer"
+msgstr "Adicionar apontamento manual"
+
+msgid "Enter the start and end of the period worked."
+msgstr "Informe o início e o término do período trabalhado."
+
+msgid "Existing timers"
+msgstr "Apontamentos existentes"
+
+msgid "Enter valid start and end dates."
+msgstr "Informe datas e horários válidos de início e término."
+
+msgid "The end must be later than the start."
+msgstr "O término deve ser posterior ao início."
+
+msgid "A completed timer cannot end in the future."
+msgstr "Um apontamento encerrado não pode terminar no futuro."
+
+msgid "The interval overlaps an existing timer for this task."
+msgstr "O intervalo coincide com um apontamento existente nesta tarefa."
+
+msgid "You do not have permission to modify these timers."
+msgstr "Você não tem permissão para modificar estes apontamentos."
+
+msgid "Could not save the manual timer."
+msgstr "Não foi possível salvar o apontamento manual."
+
+msgid "Could not update the task duration."
+msgstr "Não foi possível atualizar a duração da tarefa."
+
+msgid "Could not save the manual timer. No changes were saved."
+msgstr "Não foi possível salvar o apontamento manual. Nenhuma alteração foi salva."
+
+msgid "Manual timer added."
+msgstr "Apontamento manual adicionado."
+
+#, php-format
+msgid "Manual timer #%1$d, task #%2$d, technician #%3$d: %4$s - %5$s (%6$d seconds)."
+msgstr "Apontamento manual #%1$d, tarefa #%2$d, técnico #%3$d: %4$s - %5$s (%6$d segundos)."
+
 #: hook.php:343 hook.php:362 inc/task.class.php:87 inc/task.class.php:105
 #: inc/task.class.php:845 inc/task.class.php:851 inc/task.class.php:857
 msgid "Duration Diff"
