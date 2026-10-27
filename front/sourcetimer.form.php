@@ -47,6 +47,12 @@ if (
         $config = new PluginActualtimeConfig();
         foreach ((array)($_POST['actual_end'] ?? []) as $key => $value) {
             if (is_string($value) && $value !== '') {
+                try {
+                    $value = PluginActualtimeManualtimer::normalizeDateTime($value);
+                } catch (InvalidArgumentException $error) {
+                    Session::addMessageAfterRedirect($error->getMessage(), false, ERROR);
+                    continue;
+                }
                 $actualtime = new PluginActualtimeTask();
                 if (
                     $actualtime->getFromDB($key)

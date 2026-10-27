@@ -32,9 +32,13 @@ try {
     unset($_SESSION['plugin_actualtime_manualtimer'][$itemtype][$task_id]);
     Session::addMessageAfterRedirect(__('Manual timer added.', 'actualtime'), false, INFO);
 } catch (Throwable $error) {
-    // Keep canonical dates only: GLPI's widget expects a date and a time part.
+    // Preserve valid local dates from both native controls and previous forms.
     foreach ($values as &$value) {
-        $value = is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D', $value) ? $value : '';
+        try {
+            $value = PluginActualtimeManualtimer::normalizeDateTime($value);
+        } catch (InvalidArgumentException $invalid_date) {
+            $value = '';
+        }
     }
     unset($value);
     $_SESSION['plugin_actualtime_manualtimer'][$itemtype][$task_id] = $values;

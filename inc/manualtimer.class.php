@@ -12,20 +12,31 @@ if (!defined('GLPI_ROOT')) {
 
 class PluginActualtimeManualtimer
 {
-    /** Validate the canonical date format submitted by GLPI's datetime widget. */
+    /** Accept GLPI timestamps and the local ISO format of browser date controls. */
+    public static function normalizeDateTime($value): string
+    {
+        if (is_string($value) && preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/D', $value)) {
+            $value = str_replace('T', ' ', $value);
+            if (strlen($value) === 16) {
+                $value .= ':00';
+            }
+        }
+        if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D', $value)) {
+            throw new InvalidArgumentException(__('Enter valid start and end dates.', 'actualtime'));
+        }
+        $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value);
+        if ($date === false || $date->format('Y-m-d H:i:s') !== $value || $date->getTimestamp() < 1) {
+            throw new InvalidArgumentException(__('Enter valid start and end dates.', 'actualtime'));
+        }
+        return $value;
+    }
+
+    /** Validate the interval in the same local timezone used by GLPI/MySQL. */
     public static function validateInterval($begin, $end, ?DateTimeImmutable $now = null): array
     {
-        $dates = [];
-        foreach ([$begin, $end] as $value) {
-            if (!is_string($value) || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/D', $value)) {
-                throw new InvalidArgumentException(__('Enter valid start and end dates.', 'actualtime'));
-            }
-            $date = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value);
-            if ($date === false || $date->format('Y-m-d H:i:s') !== $value || $date->getTimestamp() < 1) {
-                throw new InvalidArgumentException(__('Enter valid start and end dates.', 'actualtime'));
-            }
-            $dates[] = $date;
-        }
+        $begin = self::normalizeDateTime($begin);
+        $end = self::normalizeDateTime($end);
+        $dates = [new DateTimeImmutable($begin), new DateTimeImmutable($end)];
 
         $seconds = $dates[1]->getTimestamp() - $dates[0]->getTimestamp();
         if ($seconds <= 0 || $seconds > 2147483647) {
