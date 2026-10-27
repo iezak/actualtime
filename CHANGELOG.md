@@ -1,5 +1,20 @@
 # Actualtime
 
+## [3.2.3-london.1] - 2026-10-27
+
+### Added
+
+- London stage 3: delete a completed or paused timer from Modify timers, with
+  a separate confirmation showing the saved dates, technician and duration.
+- Recalculate totals when configured, keep the task state and other segments,
+  and retain the deleted interval, technician and operator in parent history.
+- Atomically remove the selected timer and its native modification snapshot,
+  sharing the existing task lock and rejecting stale confirmation values.
+- Require pausing an active timer before deletion. Confirmation and deletion
+  keep profile/entity/task access checks and GLPI CSRF validation.
+- Portuguese translations and regression/browser coverage for canceling,
+  confirming, conflicting changes, totals, permission denial and rollback.
+
 ## [3.2.2-london.1] - 2026-10-27
 
 ### Added

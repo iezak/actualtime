@@ -261,6 +261,7 @@ JAVASCRIPT;
         echo "<form name='form' id='form' method='post' action='" . $this->getFormURL() . "' data-submit-once>";
         echo Html::hidden('itemtype', ['value' => $itemtype]);
         echo Html::hidden('items_id', ['value' => $items_id]);
+        $delete_forms = [];
         foreach ($timers as $data) {
             $id = (int)$data['id'];
             $begin_value = $data['actual_begin'];
@@ -278,7 +279,16 @@ JAVASCRIPT;
                 }
             }
             echo "<div class='card-body row' data-actualtime-timer-id='" . $id . "'>";
-            echo "<div class='col-12 mb-2'><strong>" . sprintf(__('Timer #%d', 'actualtime'), $id) . "</strong></div>";
+            echo "<div class='col-12 mb-2 d-flex justify-content-between align-items-center'>";
+            echo "<strong>" . sprintf(__('Timer #%d', 'actualtime'), $id) . "</strong>";
+            if ($data['actual_end'] !== null) {
+                $delete_forms[] = $data;
+                echo "<button class='btn btn-sm btn-outline-danger' type='submit' form='actualtime_delete_" . $id . "' name='preview_delete' value='1'>";
+                echo "<i class='fas fa-trash-alt me-1' aria-hidden='true'></i>" . __('Delete timer', 'actualtime') . "</button>";
+            } else {
+                echo "<span class='text-muted'>" . __('Pause the running timer before deleting this entry.', 'actualtime') . "</span>";
+            }
+            echo "</div>";
             if ($stale) {
                 echo "<div class='alert alert-warning'>" . __('This timer changed. Its latest values are shown.', 'actualtime') . "</div>";
             }
@@ -310,6 +320,51 @@ JAVASCRIPT;
         echo "<span>" . _x('button', 'Save') . "</span>";
         echo "</button>";
         echo "</div>";
+        Html::closeForm();
+        echo "</div>";
+
+        // External forms keep deletion independent of unsaved/required edit fields.
+        foreach ($delete_forms as $data) {
+            echo "<form class='d-none' id='actualtime_delete_" . (int)$data['id'] . "' method='post' action='"
+                . Plugin::getWebDir('actualtime') . "/front/deletetimer.form.php' data-submit-once>";
+            self::deletionFields($itemtype, $items_id, $data);
+            Html::closeForm();
+        }
+    }
+
+    private static function deletionFields(string $itemtype, int $items_id, array $timer): void
+    {
+        echo Html::hidden('itemtype', ['value' => $itemtype]);
+        echo Html::hidden('items_id', ['value' => $items_id]);
+        echo Html::hidden('timer_id', ['value' => (int)$timer['id']]);
+        foreach (['begin', 'end', 'actiontime', 'users_id'] as $field) {
+            $column = $field === 'users_id' ? $field : 'actual_' . $field;
+            echo Html::hidden('original_' . $field, ['value' => (string)$timer[$column]]);
+        }
+    }
+
+    /** Confirmation uses persisted values, never unsaved calendar inputs. */
+    public static function deletionForm(string $itemtype, int $items_id, array $timer): void
+    {
+        echo "<div class='card-body' data-actualtime-delete-confirmation>";
+        echo "<h3>" . __('Delete timer', 'actualtime') . " #" . (int)$timer['id'] . "</h3>";
+        echo "<p>" . __('Permanently delete this timer? Its dates and duration will remain in the item history.', 'actualtime') . "</p>";
+        echo "<dl class='row'>";
+        foreach ([
+            __('Task') => '#' . $items_id,
+            __('Start date') => $timer['actual_begin'],
+            __('End date') => $timer['actual_end'],
+            __('Duration') => Html::timestampToString($timer['actual_actiontime']),
+            __('Technician') => getUserName($timer['users_id']),
+        ] as $label => $value) {
+            echo "<dt class='col-sm-3'>" . self::escapeHtml($label) . "</dt><dd class='col-sm-9'>" . self::escapeHtml($value) . "</dd>";
+        }
+        echo "</dl>";
+        echo "<form method='post' action='" . Plugin::getWebDir('actualtime') . "/front/deletetimer.form.php' data-submit-once>";
+        self::deletionFields($itemtype, $items_id, $timer);
+        echo "<button type='submit' name='confirm_delete' value='1' class='btn btn-danger me-2'>" . __('Confirm deletion', 'actualtime') . "</button>";
+        echo "<a class='btn btn-secondary' data-actualtime-delete-cancel href='" . Plugin::getWebDir('actualtime')
+            . "/ajax/changetimer.php?itemtype=" . rawurlencode($itemtype) . "&amp;task_id=" . $items_id . "'>" . __('Cancel') . "</a>";
         Html::closeForm();
         echo "</div>";
     }

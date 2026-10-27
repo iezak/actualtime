@@ -1,12 +1,33 @@
-# ActualTime London — etapa 2
+# ActualTime London — etapa 3
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.2-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.3-london.1**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
 ## Entrega atual
 
-Em **Modify timers**, a seção **Apontamentos existentes** permite editar o início
+Em **Modify timers > Apontamentos existentes**, cada período encerrado tem o
+botão **Excluir apontamento**. Ele abre uma confirmação com os horários salvos,
+o técnico e a duração. **Cancelar** retorna ao editor; **Confirmar exclusão**
+remove somente o apontamento escolhido. Para excluir um registro ativo,
+pause o cronômetro antes de abrir a confirmação.
+
+A exclusão recalcula o total da tarefa quando **Automatically update the
+duration** estiver habilitado, respeitando o arredondamento do GLPI. Excluir o
+último período zera esse total automático. Com a opção desligada, a duração
+informada manualmente na tarefa é mantida. O estado da tarefa e os demais
+apontamentos permanecem iguais, inclusive outro período ativo da mesma tarefa.
+
+O histórico do chamado, problema, mudança ou projeto mantém o ID do apontamento
+excluído, a tarefa, o técnico, o início, o término, a duração exata e o autor
+da exclusão. O histórico anterior é preservado. A remoção é definitiva; os dados
+ficam disponíveis no histórico para conferência.
+
+A confirmação usa o período salvo. Alterações ainda não salvas nos calendários
+do editor não são gravadas ao clicar em excluir. Se o período mudar em outra
+aba entre a abertura e a confirmação, a exclusão é bloqueada para revisão.
+
+A edição validada na etapa 2 continua disponível: a seção **Apontamentos existentes** permite editar o início
 e o término de registros encerrados. Em um cronômetro ativo, somente o início
 pode ser corrigido; ele continua contando até ser pausado ou encerrado pelos
 controles normais. Salvar a edição preserva o técnico e o estado da tarefa.
@@ -52,8 +73,9 @@ A duração real tem precisão de segundos. A duração da tarefa só é atualiz
 arredondamento do GLPI. Exemplo: um apontamento de 7 minutos continua com 7
 minutos reais e pode arredondar a duração da tarefa para 15 minutos.
 
-A criação e a edição usam transações nas tabelas InnoDB do GLPI. Falhas de
-gravação revertem apontamentos, histórico e totais. Criação, edição e controles
+A criação, a edição e a exclusão usam transações nas tabelas InnoDB do GLPI.
+Falhas de gravação revertem apontamentos, histórico e totais. Criação, edição,
+exclusão e controles
 nativos de iniciar/pausar/encerrar compartilham o bloqueio da linha da tarefa,
 para que usem os horários atuais ao calcular o tempo. O total nativo inclui o
 tempo já transcorrido do cronômetro ativo, quando houver um.
@@ -65,10 +87,10 @@ tempo já transcorrido do cronômetro ativo, quando houver um.
    ativos antes de substituir os arquivos.
 3. Após mesclar a PR desta etapa em **london/glpi10**, atualize essa branch pelo
    LondonPluginManager. Para testar antes da mesclagem, selecione a branch
-   **london/etapa-2-editar-apontamentos**. Use a mesma pasta **actualtime**.
+   **london/etapa-3-excluir-apontamentos**. Use a mesma pasta **actualtime**.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI e confirme a versão **3.2.2-london.1**.
+5. Limpe o cache do GLPI e confirme a versão **3.2.3-london.1**.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
 
@@ -83,6 +105,14 @@ Use um dia passado e um chamado aberto com uma tarefa salva:
 
 | Teste | Resultado esperado |
 |---|---|
+| Criar períodos isolados de 08:00–08:30 e 08:30–08:45 | Total real de 45 min |
+| Clicar em excluir no primeiro período e cancelar | Dois registros e total de 45 min permanecem |
+| Repetir e confirmar a exclusão do primeiro período | Restam 15 min; segundo registro e estado da tarefa preservados |
+| Conferir histórico do chamado | Autor e dados completos do período excluído registrados |
+| Excluir o último período | Lista vazia e duração automática igual a zero; permite novo lançamento |
+| Tentar excluir registro ativo | Orienta pausar primeiro; depois da pausa, permite excluir |
+| Confirmar exclusão em uma aba depois de editar o mesmo registro em outra | Bloqueia exclusão e pede revisão dos valores atuais |
+| Excluir período passado enquanto outro está ativo | Cronômetro ativo continua; total segue o cálculo nativo |
 | Apontamento isolado de 08:00–08:30; alterar início para 07:45 | Mesmo registro com 45 min e técnico preservado |
 | Nesse registro, alterar término para 08:45 | Mesmo registro com 1 h e total recalculado, se habilitado |
 | Abrir novamente Modify timers e conferir histórico do chamado | Horários salvos; histórico com autor e valores antes/depois |
@@ -111,8 +141,8 @@ espelho: os testes automatizados isolados não substituem essa homologação.
 ## Próximas etapas (uma entrega por vez)
 
 1. **Concluída:** criar apontamento manual encerrado.
-2. **Atual:** alterar início e término, incluindo início de apontamento ativo.
-3. Excluir um apontamento com confirmação e auditoria.
+2. **Concluída:** alterar início e término, incluindo início de apontamento ativo.
+3. **Atual:** excluir um apontamento com confirmação e auditoria.
 4. Liberar tarefas simultâneas para o mesmo usuário.
 5. Adaptar contadores, lembretes e controles independentes.
 6. Revisar totais, permissões e integrações no conjunto.
@@ -123,6 +153,7 @@ Executar na raiz do plugin com PHP 8.1 ou posterior:
 
     php tests/regression/manualtimer.php
     php tests/regression/edit-timers.php
+    php tests/regression/delete-timers.php
 
 Para testar com a classe Html real do GLPI 10.0.26, informe a raiz de uma cópia
 desse código. O teste importa somente src/Html.php; não inicia o GLPI nem acessa
@@ -130,11 +161,14 @@ o banco real:
 
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/manualtimer.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/edit-timers.php
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/delete-timers.php
 
 Com Playwright/Chromium, jQuery 3.6.0 e Flatpickr 4.6.13 disponíveis, o teste de
 navegador usa a classe Html e os helpers JavaScript do GLPI 10.0.26. Abre o
 calendário original em um iframe, valida datas da criação e grava edições de
-apontamentos encerrados e ativos pelos métodos PHP reais do plugin:
+apontamentos encerrados e ativos pelos métodos PHP reais do plugin. Também
+exercita o controle de envio único do GLPI, a confirmação, o cancelamento e a
+exclusão, inclusive com campos de edição inválidos que ainda não foram salvos:
 
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/calendar.browser.cjs
 
@@ -143,6 +177,7 @@ js/flatpickr_buttons_plugin.js. O PHP usado no teste precisa da extensão intl.
 
 Os testes executam o código do plugin com adaptadores em memória para os serviços
 do GLPI. Cobrem datas, autorização, persistência, arredondamento, duplicatas,
-edição ativa, conflitos entre abas, controles nativos, rollback e formulário.
+edição ativa, exclusão confirmada, conflitos entre abas, controles nativos,
+rollback e formulário.
 O ambiente real com GLPI/MySQL, concorrência entre
 requisições e interação visual precisam ser validados no espelho.
