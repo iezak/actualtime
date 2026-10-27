@@ -1,5 +1,21 @@
 # Actualtime
 
+## [3.2.2-london.1] - 2026-10-27
+
+### Added
+
+- London stage 2: edit start/end timestamps of completed timers and correct the
+  start of a running timer without pausing it, using the original GLPI calendar.
+- Validate the full edit batch, reject invalid/future/overlapping intervals and
+  stale changed rows, preserve submitted dates on errors, and record each
+  before/after pair and operator in the parent item's history.
+- Recalculate task duration when configured and retain the native first-change
+  snapshot and modification indicator, without database schema changes.
+- Share the task-row lock with native start/pause/stop so an active correction
+  and timer controls use the current timestamps.
+- Portuguese translations, edit/storage-failure regressions and iframe browser
+  coverage using the real GLPI 10.0.26 calendar.
+
 ## [3.2.1-london.4] - 2026-10-27
 
 ### Changed

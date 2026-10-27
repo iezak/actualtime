@@ -29,82 +29,36 @@
  * -------------------------------------------------------------------------
  */
 
+// GLPI validates the CSRF token in this bootstrap.
 include("../../../inc/includes.php");
 
 Session::checkLoginUser();
-
+$itemtype = $_POST['itemtype'] ?? null;
+$task_id = $_POST['items_id'] ?? null;
 if (
-    !(new Plugin())->isActivated('actualtime')
-    || !PluginActualtimeSourcetimer::canModify($_POST['itemtype'] ?? null, $_POST['items_id'] ?? null)
+    $_SERVER['REQUEST_METHOD'] !== 'POST'
+    || !isset($_POST['update'])
+    || !(new Plugin())->isActivated('actualtime')
+    || !PluginActualtimeSourcetimer::canModify($itemtype, $task_id)
 ) {
     Html::displayRightError();
 }
-if (
-    PluginActualtimeSourcetimer::checkItemtypeRight($_POST["itemtype"])
-    && PluginActualtimeSourcetimer::canModify($_POST["itemtype"], $_POST["items_id"])
-) {
-    if (isset($_POST["update"])) {
-        $config = new PluginActualtimeConfig();
-        foreach ((array)($_POST['actual_end'] ?? []) as $key => $value) {
-            if (is_string($value) && $value !== '') {
-                try {
-                    $value = PluginActualtimeManualtimer::normalizeDateTime($value);
-                } catch (InvalidArgumentException $error) {
-                    Session::addMessageAfterRedirect($error->getMessage(), false, ERROR);
-                    continue;
-                }
-                $actualtime = new PluginActualtimeTask();
-                if (
-                    $actualtime->getFromDB($key)
-                    && $actualtime->fields['itemtype'] === $_POST['itemtype']
-                    && (int)$actualtime->fields['items_id'] === (int)$_POST['items_id']
-                    && !empty($actualtime->fields['actual_end'])
-                ) {
-                    if ($value != $actualtime->fields['actual_end'] && $value > $actualtime->fields['actual_begin']) {
-                        $seconds = (strtotime($value) - strtotime($actualtime->fields['actual_begin']));
-                        $input = [
-                            'id'                => $key,
-                            'actual_end'        => $value,
-                            'actual_actiontime' => $seconds,
-                            'is_modified'       => 1
-                        ];
-                        if ($actualtime->fields['is_modified'] == 0) {
-                            $source = new PluginActualtimeSourcetimer();
-                            $input_source = [
-                                'plugin_actualtime_tasks_id' => $actualtime->fields['id'],
-                                'users_id'          => Session::getLoginUserID(),
-                                'source_end'        => $actualtime->fields['actual_end'],
-                                'source_actiontime' => $actualtime->fields['actual_actiontime'],
-                            ];
-                            $source->add($input_source);
-                        }
-                        $actualtime->update($input);
-                    }
-                }
-            }
-        }
 
-        if ($config->autoUpdateDuration()) {
-            $task_id = $_POST["items_id"];
-            $itemtype = $_POST["itemtype"];
-            $task = new $itemtype();
-            $task->getFromDB($task_id);
-            $input = [
-                'id' => $task_id,
-            ];
-
-            /** @var array $CFG_GLPI */
-            global $CFG_GLPI;
-            $totaltime = PluginActualtimeTask::totalEndTime($task_id, $itemtype);
-            $step = $CFG_GLPI["time_step"];
-            $ceil = ceil($totaltime / ($step * MINUTE_TIMESTAMP)) * ($step * MINUTE_TIMESTAMP);
-            if (isset($task->fields['actiontime'])) {
-                $input['actiontime'] = $ceil;
-            } else {
-                $input['effective_duration'] = $ceil;
-            }
-            $task->update($input);
-        }
+$task_id = (int)$task_id;
+try {
+    $changed = PluginActualtimeManualtimer::edit($itemtype, $task_id, $_POST);
+    unset($_SESSION['plugin_actualtime_edittimers'][$itemtype][$task_id]);
+    Session::addMessageAfterRedirect($changed
+        ? __('Timer changes saved.', 'actualtime')
+        : __('No timer changes to save.', 'actualtime'), false, INFO);
+} catch (Throwable $error) {
+    $_SESSION['plugin_actualtime_edittimers'][$itemtype][$task_id] = PluginActualtimeManualtimer::formValues($_POST);
+    $expected = $error instanceof InvalidArgumentException || $error instanceof UnexpectedValueException;
+    Session::addMessageAfterRedirect($expected ? $error->getMessage()
+        : __('Could not save the timer changes. No changes were saved.', 'actualtime'), false, ERROR);
+    if (!$expected) {
+        Toolbox::logInFile('php-errors', 'ActualTime timer edit: ' . $error->getMessage() . "\n");
     }
 }
-Html::back();
+
+Html::redirect(Plugin::getWebDir('actualtime') . '/ajax/changetimer.php?itemtype=' . rawurlencode($itemtype) . '&task_id=' . $task_id);

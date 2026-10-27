@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Manual timer creation for the London fork of ActualTime.
+ * Timer management for the London fork of ActualTime.
  * Based on ActualTime, Copyright (C) 2018-2025 TICGAL Team.
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -65,6 +65,198 @@ class PluginActualtimeManualtimer
             throw new RuntimeException(__('You do not have permission to modify these timers.', 'actualtime'));
         }
         return $task;
+    }
+
+    /** Shared task lock for edits and native start/pause/stop operations. */
+    public static function withTaskLock($itemtype, $items_id, callable $operation)
+    {
+        global $DB;
+        if (
+            !in_array($itemtype, [TicketTask::class, ChangeTask::class, ProblemTask::class, ProjectTask::class], true)
+            || filter_var($items_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+        ) {
+            throw new InvalidArgumentException(__('Invalid timer task.', 'actualtime'));
+        }
+        $connection = $DB;
+        $owns_transaction = !$connection->inTransaction();
+        if ($owns_transaction && !$connection->beginTransaction()) {
+            throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+        }
+        try {
+            if (!$connection->query(sprintf('SELECT id FROM %s WHERE id = %d FOR UPDATE', $connection->quoteName($itemtype::getTable()), (int)$items_id))) {
+                throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+            }
+            $result = $operation();
+            if ($owns_transaction && !$connection->commit()) {
+                throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+            }
+            return $result;
+        } catch (Throwable $error) {
+            if ($owns_transaction) {
+                $connection->rollBack();
+            }
+            throw $error;
+        }
+    }
+
+    private static function updateDuration(CommonDBTM $task): void
+    {
+        global $CFG_GLPI;
+        if (!(new PluginActualtimeConfig())->autoUpdateDuration()) {
+            return;
+        }
+        $step = max(1, (int)($CFG_GLPI['time_step'] ?? 1)) * MINUTE_TIMESTAMP;
+        $total = PluginActualtimeTask::totalEndTime($task->getID(), $task->getType());
+        $field = array_key_exists('actiontime', $task->fields) ? 'actiontime' : 'effective_duration';
+        if (!$task->update([
+            'id' => $task->getID(),
+            $field => (int)(ceil($total / $step) * $step),
+            '_disablenotif' => true,
+        ])) {
+            throw new RuntimeException(__('Could not update the task duration.', 'actualtime'));
+        }
+    }
+
+    /** Validate the whole batch before changing any timer. */
+    public static function edit($itemtype, $items_id, array $input): int
+    {
+        global $DB;
+        self::getEditableTask($itemtype, $items_id);
+        foreach (['actual_begin', 'actual_end', 'original_begin', 'original_end'] as $field) {
+            if (!isset($input[$field]) || !is_array($input[$field])) {
+                throw new InvalidArgumentException(__('Close and reopen the timer editor before saving.', 'actualtime'));
+            }
+        }
+        if (!$input['actual_begin']) {
+            return 0;
+        }
+        return self::withTaskLock($itemtype, $items_id, static function () use ($itemtype, $items_id, $input, $DB) {
+            $task = self::getEditableTask($itemtype, $items_id);
+            $rows = [];
+            foreach ($DB->request([
+                'FROM' => PluginActualtimeTask::getTable(),
+                'WHERE' => ['itemtype' => $itemtype, 'items_id' => (int)$items_id, 'NOT' => ['actual_begin' => null]],
+                'ORDER' => ['id ASC'],
+            ]) as $row) {
+                $rows[(int)$row['id']] = $row;
+            }
+            $pending = $rows;
+            $changes = [];
+            $now = new DateTimeImmutable();
+            foreach ($input['actual_begin'] as $id => $value) {
+                if (
+                    filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+                    || !isset($rows[(int)$id])
+                    || !array_key_exists($id, $input['actual_end'])
+                    || !array_key_exists($id, $input['original_begin'])
+                    || !array_key_exists($id, $input['original_end'])
+                ) {
+                    throw new InvalidArgumentException(__('One of the timers is unavailable. Reopen the editor.', 'actualtime'));
+                }
+                $id = (int)$id;
+                $before = $rows[$id];
+                $begin = self::normalizeDateTime($value);
+                $end_value = $input['actual_end'][$id];
+                $end = $end_value === '' ? null : self::normalizeDateTime($end_value);
+                $original_begin = $input['original_begin'][$id];
+                $original_end = $input['original_end'][$id];
+                if (!is_string($original_begin) || !is_string($original_end)) {
+                    throw new InvalidArgumentException(__('Close and reopen the timer editor before saving.', 'actualtime'));
+                }
+                // Untouched inputs must not overwrite changes made in another tab.
+                if ($begin === $original_begin && (string)$end === $original_end) {
+                    continue;
+                }
+                if ($original_begin !== (string)$before['actual_begin'] || $original_end !== (string)$before['actual_end']) {
+                    throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+                }
+                if ($before['actual_end'] === null) {
+                    if ($end !== null) {
+                        throw new InvalidArgumentException(__('Pause or stop the running timer before changing its end.', 'actualtime'));
+                    }
+                    if (new DateTimeImmutable($begin) > $now) {
+                        throw new InvalidArgumentException(__('A running timer cannot start in the future.', 'actualtime'));
+                    }
+                    $interval = ['actual_begin' => $begin, 'actual_end' => null, 'actual_actiontime' => 0];
+                } else {
+                    $interval = self::validateInterval($begin, $end, $now);
+                }
+                $pending[$id] = array_merge($before, $interval);
+                $changes[$id] = ['before' => $before, 'interval' => $interval];
+            }
+            foreach ($changes as $id => $change) {
+                $candidate = $pending[$id];
+                foreach ($pending as $other_id => $other) {
+                    if (
+                        $id !== $other_id
+                        && ($other['actual_end'] === null || $candidate['actual_begin'] < $other['actual_end'])
+                        && ($candidate['actual_end'] === null || $other['actual_begin'] < $candidate['actual_end'])
+                    ) {
+                        throw new InvalidArgumentException(__('The interval overlaps an existing timer for this task.', 'actualtime'));
+                    }
+                }
+            }
+            foreach ($changes as $id => $change) {
+                $before = $change['before'];
+                $source = $DB->request([
+                    'FROM' => PluginActualtimeSourcetimer::getTable(),
+                    'WHERE' => ['plugin_actualtime_tasks_id' => $id],
+                    'LIMIT' => 1,
+                ]);
+                if (!$source->current() && !$DB->insert(PluginActualtimeSourcetimer::getTable(), [
+                    'plugin_actualtime_tasks_id' => $id,
+                    'users_id' => Session::getLoginUserID(),
+                    'source_end' => $before['actual_end'],
+                    'source_actiontime' => $before['actual_end'] === null
+                        ? max(0, $now->getTimestamp() - strtotime($before['actual_begin']))
+                        : $before['actual_actiontime'],
+                    'date_creation' => date('Y-m-d H:i:s'),
+                ])) {
+                    throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+                }
+                if (!$DB->update(PluginActualtimeTask::getTable(), $change['interval'] + ['is_modified' => 1], [
+                    'id' => $id, 'itemtype' => $itemtype, 'items_id' => (int)$items_id,
+                    'actual_begin' => $before['actual_begin'], 'actual_end' => $before['actual_end'],
+                ]) || $DB->affectedRows() !== 1) {
+                    throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+                }
+                $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
+                $parent = new $parent_type();
+                $message = sprintf(
+                    __('Timer #%1$d, task #%2$d: %3$s / %4$s -> %5$s / %6$s.', 'actualtime'),
+                    $id, $items_id, $before['actual_begin'], $before['actual_end'] ?? __('In progress'),
+                    $change['interval']['actual_begin'], $change['interval']['actual_end'] ?? __('In progress')
+                );
+                if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+                    [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
+                    throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+                }
+            }
+            if ($changes) {
+                self::updateDuration($task);
+            }
+            return count($changes);
+        });
+    }
+
+    /** Preserve only canonical dates and positive timer IDs after an error. */
+    public static function formValues(array $input): array
+    {
+        $out = [];
+        foreach (['actual_begin', 'actual_end', 'original_begin', 'original_end'] as $field) {
+            $out[$field] = [];
+            foreach (is_array($input[$field] ?? null) ? $input[$field] : [] as $id => $value) {
+                if (filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+                    continue;
+                }
+                try {
+                    $out[$field][(int)$id] = $value === '' ? '' : self::normalizeDateTime($value);
+                } catch (InvalidArgumentException $error) {
+                    $out[$field][(int)$id] = '';
+                }
+            }
+        }
+        return $out;
     }
 
     /** Create an ended segment without starting, pausing or completing the task. */

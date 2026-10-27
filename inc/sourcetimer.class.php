@@ -220,6 +220,8 @@ JAVASCRIPT;
         $items_id = (int)$items_id;
         $saved = $_SESSION['plugin_actualtime_manualtimer'][$itemtype][$items_id] ?? [];
         unset($_SESSION['plugin_actualtime_manualtimer'][$itemtype][$items_id]);
+        $saved_edits = $_SESSION['plugin_actualtime_edittimers'][$itemtype][$items_id] ?? [];
+        unset($_SESSION['plugin_actualtime_edittimers'][$itemtype][$items_id]);
 
         echo "<div class='card-body'>";
         echo "<h3>" . __('Add a manual timer', 'actualtime') . "</h3>";
@@ -243,7 +245,7 @@ JAVASCRIPT;
             'WHERE' => [
                 'items_id' => $items_id,
                 'itemtype' => $itemtype,
-                'NOT' => ['actual_end' => null],
+                'NOT' => ['actual_begin' => null],
             ],
             'ORDER' => ['actual_begin ASC', 'id ASC'],
         ];
@@ -255,18 +257,47 @@ JAVASCRIPT;
 
         echo "<div class='card-body border-top'>";
         echo "<h3>" . __('Existing timers', 'actualtime') . "</h3>";
+        echo "<p class='text-muted'>" . __('Edit start and end dates. For a running timer, only the start can be changed.', 'actualtime') . "</p>";
         echo "<form name='form' id='form' method='post' action='" . $this->getFormURL() . "' data-submit-once>";
         echo Html::hidden('itemtype', ['value' => $itemtype]);
         echo Html::hidden('items_id', ['value' => $items_id]);
         foreach ($timers as $data) {
-            echo "<div class='card-body row'>";
+            $id = (int)$data['id'];
+            $begin_value = $data['actual_begin'];
+            $end_value = $data['actual_end'];
+            $stale = false;
+            if (isset($saved_edits['original_begin'][$id]) && array_key_exists($id, $saved_edits['original_end'] ?? [])) {
+                if (
+                    $saved_edits['original_begin'][$id] === (string)$data['actual_begin']
+                    && $saved_edits['original_end'][$id] === (string)$data['actual_end']
+                ) {
+                    $begin_value = $saved_edits['actual_begin'][$id] ?? $begin_value;
+                    $end_value = $saved_edits['actual_end'][$id] ?? $end_value;
+                } else {
+                    $stale = true;
+                }
+            }
+            echo "<div class='card-body row' data-actualtime-timer-id='" . $id . "'>";
+            echo "<div class='col-12 mb-2'><strong>" . sprintf(__('Timer #%d', 'actualtime'), $id) . "</strong></div>";
+            if ($stale) {
+                echo "<div class='alert alert-warning'>" . __('This timer changed. Its latest values are shown.', 'actualtime') . "</div>";
+            }
+            echo Html::hidden('original_begin[' . $id . ']', ['value' => (string)$data['actual_begin']]);
+            echo Html::hidden('original_end[' . $id . ']', ['value' => (string)$data['actual_end']]);
 
             echo "<div class='form-field row col-12 mb-2'>";
             echo "<label class='col-form-label col-2 text-xxl-end'>" . __('Start date') . "</label>";
-            echo "<label class='col-form-label col-2'>" . self::escapeHtml($data['actual_begin']) . "</label>";
+            echo "<div class='col-4 field-container'>";
+            self::showDateTimeField('actual_begin[' . $id . ']', $begin_value, true, true);
+            echo "</div>";
             echo "<label class='col-form-label col-2 text-xxl-end'>" . __('End date') . "</label>";
-            echo "<div class='col-6  field-container'>";
-            self::showDateTimeField('actual_end[' . $data['id'] . ']', $data['actual_end']);
+            echo "<div class='col-4 field-container'>";
+            if ($data['actual_end'] === null) {
+                echo Html::hidden('actual_end[' . $id . ']', ['value' => '']);
+                echo "<span class='form-control-plaintext'>" . __('In progress') . "</span>";
+            } else {
+                self::showDateTimeField('actual_end[' . $id . ']', $end_value, true, true);
+            }
             echo "</div>";
 
             echo "</div>";
