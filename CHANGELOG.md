@@ -1,5 +1,14 @@
 # Actualtime
 
+## [3.2.1-london.4] - 2026-10-27
+
+### Changed
+
+- Restore Html::showDateTimeField(), the original GLPI calendar used by
+  ActualTime 3.2.0, for manual periods and existing end-date editing.
+- Keep the GLPI 10 HTML-escaping fix and backwards compatibility with values
+  submitted by cached forms.
+
 ## [3.2.1-london.3] - 2026-10-27
 
 ### Fixed
