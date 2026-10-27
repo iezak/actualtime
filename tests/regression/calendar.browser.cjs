@@ -17,6 +17,7 @@ const glpi = process.env.ACTUALTIME_GLPI_CORE;
 assert.ok(glpi, 'Set ACTUALTIME_GLPI_CORE to a GLPI 10.0.26 source directory');
 const fixture = path.join(__dirname, 'manualtimer.php');
 const html = execFileSync(php, [fixture, '--render-calendar-fixture'], { encoding: 'utf8' });
+const activeHtml = execFileSync(php, [fixture, '--render-calendar-fixture', 'active'], { encoding: 'utf8' });
 const common = fs.readFileSync(path.join(glpi, 'js/common.js'), 'utf8');
 const localeHelper = common.match(/function getFlatPickerLocale\(language, region\) \{[\s\S]*?\n\}/);
 assert.ok(localeHelper, 'GLPI locale helper not found');
@@ -41,12 +42,14 @@ const server = http.createServer(async (req, res) => {
         const fields = Object.fromEntries(new URLSearchParams(body));
         try {
             assert.equal(fields._glpi_csrf_token, 'test-token');
-            const begin = fields.manual_begin || '2025-01-10 08:00:00';
-            const end = fields.manual_end || fields['actual_end[1]'];
-            const normalized = JSON.parse(execFileSync(php, [
-                fixture, '--validate-calendar-values', begin, end,
-            ], { encoding: 'utf8' }));
-            submitted.push({ fields, normalized, url: req.url });
+            const result = fields.add_manual !== undefined
+                ? JSON.parse(execFileSync(php, [
+                    fixture, '--validate-calendar-values', fields.manual_begin, fields.manual_end,
+                ], { encoding: 'utf8' }))
+                : JSON.parse(execFileSync(php, [
+                    fixture, '--apply-edit-fixture', fields['original_end[1]'] === '' ? 'active' : 'closed', body,
+                ], { encoding: 'utf8' }));
+            submitted.push({ fields, result, url: req.url });
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end('<p>Saved fixture</p>');
         } catch (error) {
@@ -56,9 +59,10 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(req.url === '/editor'
-        ? html
-        : '<!doctype html><html lang="pt-BR"><body><iframe title="Timer editor" src="/editor" style="width:100%;height:600px"></iframe></body></html>');
+    res.end(req.url.startsWith('/editor')
+        ? (req.url.includes('active=1') ? activeHtml : html)
+        : '<!doctype html><html lang="pt-BR"><body><iframe title="Timer editor" src="/editor'
+            + (req.url === '/active' ? '?active=1' : '') + '" style="width:100%;height:600px"></iframe></body></html>');
 });
 
 (async () => {
@@ -96,10 +100,18 @@ const server = http.createServer(async (req, res) => {
         await editor.locator('button[name="add_manual"]').click();
         await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body?.textContent?.includes('Saved fixture'));
         assert.equal(submitted.length, 1);
-        assert.equal(submitted[0].normalized.actual_actiontime, 1805);
+        assert.equal(submitted[0].result.actual_actiontime, 1805);
 
         await page.goto(url);
         editor = page.frameLocator('iframe');
+        const begin = editor.locator('[name="actual_begin[1]"]');
+        const beginVisible = begin.locator('..').locator('input[type="text"]');
+        await beginVisible.waitFor({ state: 'visible' });
+        await begin.locator('..').locator('[data-toggle]').click();
+        await editor.locator('.flatpickr-calendar.open').waitFor({ state: 'visible' });
+        await beginVisible.fill('10/01/2025 07:45:00');
+        await beginVisible.press('Enter');
+        assert.equal(await begin.inputValue(), '2025-01-10 07:45:00');
         const end = editor.locator('[name="actual_end[1]"]');
         const endOldVisible = end.locator('..').locator('input[type="text"]');
         await endOldVisible.waitFor({ state: 'visible' });
@@ -111,10 +123,38 @@ const server = http.createServer(async (req, res) => {
         await editor.locator('button[name="update"]').click();
         await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body?.textContent?.includes('Saved fixture'));
         assert.equal(submitted.length, 2);
-        assert.equal(submitted[1].normalized.actual_end, '2025-01-10 08:45:00');
-        assert.equal(submitted[1].normalized.actual_actiontime, 2700);
+        assert.equal(submitted[1].fields['original_begin[1]'], '2025-01-10 08:00:00');
+        assert.equal(submitted[1].fields['original_end[1]'], '2025-01-10 08:30:00');
+        assert.equal(submitted[1].result.changed, 1);
+        assert.equal(submitted[1].result.timers[0].actual_begin, '2025-01-10 07:45:00');
+        assert.equal(submitted[1].result.timers[0].actual_end, '2025-01-10 08:45:00');
+        assert.equal(submitted[1].result.timers[0].actual_actiontime, 3600);
+        assert.equal(submitted[1].result.timers[0].users_id, 42);
+        assert.equal(submitted[1].result.task.state, 1);
+        assert.equal(submitted[1].result.task.actiontime, 3600);
+
+        await page.goto(url + '/active');
+        editor = page.frameLocator('iframe');
+        const runningBegin = editor.locator('[name="actual_begin[1]"]');
+        const runningVisible = runningBegin.locator('..').locator('input[type="text"]');
+        await runningVisible.waitFor({ state: 'visible' });
+        assert.equal(await editor.locator('[name="actual_end[1]"]').getAttribute('type'), 'hidden');
+        await runningBegin.locator('..').locator('[data-toggle]').click();
+        await editor.locator('.flatpickr-calendar.open').waitFor({ state: 'visible' });
+        await runningVisible.fill('10/01/2025 07:45:00');
+        await runningVisible.press('Enter');
+        await editor.locator('button[name="update"]').click();
+        await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body?.textContent?.includes('Saved fixture'));
+        assert.equal(submitted.length, 3);
+        assert.equal(submitted[2].fields['original_end[1]'], '');
+        assert.equal(submitted[2].result.changed, 1);
+        assert.equal(submitted[2].result.timers[0].actual_begin, '2025-01-10 07:45:00');
+        assert.equal(submitted[2].result.timers[0].actual_end, null);
+        assert.equal(submitted[2].result.timers[0].actual_actiontime, 0);
+        assert.equal(submitted[2].result.task.state, 1);
+        assert.match(submitted[2].result.history.at(-1).changes[2], /2025-01-10 08:00:00 \/ In progress -> 2025-01-10 07:45:00 \/ In progress/);
         assert.deepEqual(errors, []);
-        console.log('OK: original GLPI calendar opens in an iframe and both forms submit canonical dates with seconds.');
+        console.log('OK: original GLPI calendars submit creation dates and save completed/running edits through the plugin PHP methods inside an iframe.');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

@@ -20,6 +20,53 @@ msgstr "Informe o início e o término do período trabalhado."
 msgid "Existing timers"
 msgstr "Apontamentos existentes"
 
+msgid "Edit start and end dates. For a running timer, only the start can be changed."
+msgstr "Edite o início e o término. Em um cronômetro ativo, somente o início pode ser alterado."
+
+#, php-format
+msgid "Timer #%d"
+msgstr "Apontamento #%d"
+
+msgid "Invalid timer task."
+msgstr "Tarefa do apontamento inválida."
+
+msgid "Could not save the timer changes."
+msgstr "Não foi possível salvar as alterações dos apontamentos."
+
+msgid "Close and reopen the timer editor before saving."
+msgstr "Feche e abra novamente o editor de apontamentos antes de salvar."
+
+msgid "One of the timers is unavailable. Reopen the editor."
+msgstr "Um dos apontamentos não está disponível. Abra novamente o editor."
+
+msgid "A timer changed while the editor was open. Review its latest values."
+msgstr "Um apontamento foi alterado enquanto o editor estava aberto. Confira os valores mais recentes."
+
+msgid "This timer changed. Its latest values are shown."
+msgstr "Este apontamento foi alterado. Os valores mais recentes estão sendo exibidos."
+
+msgid "Pause or stop the running timer before changing its end."
+msgstr "Pause ou encerre o cronômetro ativo antes de alterar o término."
+
+msgid "A running timer cannot start in the future."
+msgstr "Um cronômetro ativo não pode iniciar no futuro."
+
+msgid "Timer changes saved."
+msgstr "Alterações dos apontamentos salvas."
+
+msgid "No timer changes to save."
+msgstr "Nenhuma alteração nos apontamentos para salvar."
+
+msgid "Could not save the timer changes. No changes were saved."
+msgstr "Não foi possível salvar as alterações dos apontamentos. Nenhuma alteração foi salva."
+
+msgid "Could not update the timer. Refresh the task and try again."
+msgstr "Não foi possível atualizar o cronômetro. Atualize a tarefa e tente novamente."
+
+#, php-format
+msgid "Timer #%1$d, task #%2$d: %3$s / %4$s -> %5$s / %6$s."
+msgstr "Apontamento #%1$d, tarefa #%2$d: %3$s / %4$s -> %5$s / %6$s."
+
 msgid "Enter valid start and end dates."
 msgstr "Informe datas e horários válidos de início e término."
 

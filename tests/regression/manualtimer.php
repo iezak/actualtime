@@ -8,6 +8,7 @@
 
 define('GLPI_ROOT', dirname(__DIR__, 2));
 define('READ', 1);
+define('UPDATE', 2);
 define('MINUTE_TIMESTAMP', 60);
 define('GLPI_USE_CSRF_CHECK', true);
 date_default_timezone_set('America/Sao_Paulo');
@@ -20,6 +21,7 @@ function __s($message, $domain = null) { return htmlspecialchars($message, ENT_Q
 function _x($context, $message) { return $message; }
 function getUserName($id) { return $GLOBALS['actualtime_test_user_name'] ?? ('Technician ' . $id); }
 function getItemForItemtype($type) { return new $type(); }
+function getForeignKeyFieldForItemType($type) { return strtolower($type) . 's_id'; }
 
 class Session
 {
@@ -32,12 +34,13 @@ class Session
 class Plugin
 {
     public static $active = true;
-    public function isActivated($name) { return self::$active; }
+    public function isActivated($name) { return $name === 'actualtime' && self::$active; }
     public static function getWebDir($name) { return '/plugins/' . $name; }
 }
 class Toolbox
 {
     public static function getDateFormat($format) { return 'd/m/Y'; }
+    public static function logInFile($name, $message) {}
 }
 if (getenv('ACTUALTIME_GLPI_CORE')) {
     // Use GLPI's real HTML helpers without bootstrapping a database/session.
@@ -59,6 +62,8 @@ if (getenv('ACTUALTIME_GLPI_CORE')) {
         public static function closeForm() {
             echo '<input name="_glpi_csrf_token" value="test-token"></form>';
         }
+        public static function timestampToString($seconds) { return (string)$seconds; }
+        public static function showToolTip($content, $options = []) { return ''; }
     }
 }
 class CommonDBTM
@@ -71,11 +76,19 @@ class CommonDBTM
         $this->fields = self::$records[static::class][(int)$id] ?? [];
         return !empty($this->fields);
     }
+    public function getFromDBByCrit($criteria) {
+        global $DB;
+        $this->fields = $DB->request(['FROM' => static::getTable(), 'WHERE' => $criteria])->current() ?: [];
+        return !empty($this->fields);
+    }
     public function can($id, $right) {
         return $this->getFromDB($id) && !in_array(static::class . ':' . $id, self::$denied, true);
     }
     public function getField($name) { return $this->fields[$name] ?? null; }
     public function getID() { return $this->fields['id']; }
+    public static function getType() { return static::class; }
+    public static function getTypeName($nb = 0) { return static::class; }
+    public function canUpdateItem() { return true; }
     public static function getTable() {
         return static::class === PluginActualtimeTask::class
             ? 'glpi_plugin_actualtime_tasks'
@@ -84,6 +97,7 @@ class CommonDBTM
     public function getForeignKeyField() { return strtolower(static::class) . 's_id'; }
     public function getItilObjectItemType() { return str_replace('Task', '', static::class); }
     public function getFormURL() { return '/plugins/actualtime/front/sourcetimer.form.php'; }
+    public static function getFormURLWithID($id) { return '/front/task.form.php?id=' . $id; }
     public function update($input) {
         if (self::$failUpdate) {
             return false;
@@ -118,29 +132,61 @@ class Log
 class MemoryDB
 {
     public $timers = [];
+    public $sources = [];
     public $failInsert = false;
+    public $failSource = false;
+    public $failTimerUpdate = false;
     public $failLock = false;
     public $transaction = false;
+    public $beginCount = 0;
+    public $commitCount = 0;
+    public $lockQueries = [];
     private $snapshot;
     private $lastId = 0;
+    private $affected = 0;
     public function inTransaction() { return $this->transaction; }
     public function beginTransaction() {
-        $this->snapshot = [$this->timers, CommonDBTM::$records, Log::$entries];
+        ++$this->beginCount;
+        $this->snapshot = [$this->timers, $this->sources, CommonDBTM::$records, Log::$entries];
         return $this->transaction = true;
     }
-    public function commit() { $this->transaction = false; return true; }
+    public function commit() { ++$this->commitCount; $this->transaction = false; return true; }
     public function rollBack() {
-        [$this->timers, CommonDBTM::$records, Log::$entries] = $this->snapshot;
+        [$this->timers, $this->sources, CommonDBTM::$records, Log::$entries] = $this->snapshot;
         $this->transaction = false;
         return true;
     }
-    public function query($sql) { return !$this->failLock; }
+    public function query($sql) { $this->lockQueries[] = $sql; return !$this->failLock; }
+    public function quoteName($name) { return $name; }
+    public function affectedRows() { return $this->affected; }
     public function insertId() { return $this->lastId; }
     public function tableExists($table) { return true; }
     public function insert($table, $row) {
         if ($this->failInsert) { return false; }
+        if ($table === PluginActualtimeSourcetimer::getTable()) {
+            if ($this->failSource) { return false; }
+            $row['id'] = count($this->sources) + 1;
+            $this->sources[] = $row;
+            return true;
+        }
         $row['id'] = ++$this->lastId;
-        $this->timers[] = $row;
+        $this->timers[] = $row + ['actual_begin' => null, 'actual_end' => null, 'actual_actiontime' => 0, 'is_modified' => 0, 'origin_end' => 0];
+        return true;
+    }
+    public function update($table, $values, $where) {
+        $this->affected = 0;
+        if ($this->failTimerUpdate) { return false; }
+        foreach ($this->timers as &$row) {
+            if ($this->matches($row, $where)) {
+                $row = array_merge($row, $values);
+                ++$this->affected;
+            }
+        }
+        unset($row);
+        return true;
+    }
+    public function delete($table, $where) {
+        $this->timers = array_values(array_filter($this->timers, fn($row) => !$this->matches($row, $where)));
         return true;
     }
     private function matches($row, $conditions) {
@@ -167,7 +213,8 @@ class MemoryDB
         return true;
     }
     public function request($query) {
-        $rows = $query['FROM'] === ProjectState::getTable() ? [['id' => 9, 'is_finished' => 1]] : $this->timers;
+        $rows = $query['FROM'] === ProjectState::getTable() ? [['id' => 9, 'is_finished' => 1]]
+            : ($query['FROM'] === PluginActualtimeSourcetimer::getTable() ? $this->sources : $this->timers);
         $rows = array_values(array_filter($rows, fn($row) => $this->matches($row, $query['WHERE'] ?? [])));
         if (isset($query['LIMIT'])) { $rows = array_slice($rows, 0, $query['LIMIT']); }
         return new ArrayIterator($rows);
@@ -205,7 +252,7 @@ function resetFixture() {
     Log::$entries = [];
     Log::$fail = false;
     CommonDBTM::$records = [
-        PluginActualtimeConfig::class => [1 => ['id' => 1, 'autoupdate_duration' => true]],
+        PluginActualtimeConfig::class => [1 => ['id' => 1, 'autoupdate_duration' => true, 'planned_task' => 0, 'multiple_day' => 0]],
         Ticket::class => [1 => ['id' => 1, 'status' => 2, 'is_deleted' => 0]],
         TicketTask::class => [10 => ['id' => 10, 'tickets_id' => 1, 'users_id_tech' => 42, 'state' => 1, 'actiontime' => 0]],
         Project::class => [1 => ['id' => 1, 'is_deleted' => 0]],
@@ -215,10 +262,28 @@ function resetFixture() {
 function addPeriod($begin = '2025-01-10 08:00:00', $end = '2025-01-10 08:30:00', $type = TicketTask::class) {
     return PluginActualtimeManualtimer::create($type, 10, $begin, $end);
 }
+function seedRunningTimer($begin = '2025-01-10 08:00:00') {
+    global $DB;
+    $DB->insert(PluginActualtimeTask::getTable(), [
+        'itemtype' => TicketTask::class, 'items_id' => 10, 'users_id' => 42,
+        'actual_begin' => $begin, 'actual_end' => null, 'actual_actiontime' => 0,
+    ]);
+}
+function editFixtureInput(): array {
+    global $DB;
+    $input = ['actual_begin' => [], 'actual_end' => [], 'original_begin' => [], 'original_end' => []];
+    foreach ($DB->timers as $row) {
+        foreach (['actual_begin' => 'original_begin', 'actual_end' => 'original_end'] as $field => $snapshot) {
+            $input[$field][$row['id']] = (string)$row[$field];
+            $input[$snapshot][$row['id']] = (string)$row[$field];
+        }
+    }
+    return $input;
+}
 
 if (($argv[1] ?? '') === '--render-calendar-fixture') {
     resetFixture();
-    addPeriod();
+    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else { addPeriod(); }
     echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">';
     echo '<link rel="stylesheet" href="/assets/flatpickr.css">';
     echo '<style>body{font:16px sans-serif;padding:16px}label{display:block}input{padding:8px;max-width:100%}.mb-3{margin-bottom:12px}[data-toggle]{display:inline-block;min-width:24px;min-height:24px;cursor:pointer}[data-toggle]::before{content:"▦"}</style>';
@@ -229,6 +294,16 @@ if (($argv[1] ?? '') === '--render-calendar-fixture') {
     echo '<script src="/assets/flatpickr.js"></script><script src="/assets/pt.js"></script>';
     echo '<script src="/assets/glpi-calendar.js"></script>';
     echo '</body></html>';
+    exit;
+}
+
+if (($argv[1] ?? '') === '--apply-edit-fixture') {
+    resetFixture();
+    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else { addPeriod(); }
+    parse_str($argv[3] ?? '', $input);
+    $changed = PluginActualtimeManualtimer::edit(TicketTask::class, 10, $input);
+    echo json_encode(['changed' => $changed, 'timers' => $DB->timers, 'sources' => $DB->sources, 'history' => Log::$entries,
+        'task' => CommonDBTM::$records[TicketTask::class][10]]);
     exit;
 }
 
@@ -360,7 +435,7 @@ ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
 check(str_contains($html, 'actual_end['), 'Existing timer editor retained');
-check(substr_count($html, 'data-input') === 3 && str_contains($html, '2025-01-10 08:30:00'), 'Existing end date uses the original GLPI calendar');
+check(substr_count($html, 'data-input') === 4 && str_contains($html, '2025-01-10 08:30:00'), 'Existing start and end dates use the original GLPI calendar');
 check(substr_count($html, '<form ') === 2 && substr_count($html, '</form>') === 2, 'Separate balanced forms');
 check(substr_count($html, '<div') === substr_count($html, '</div>'), 'Balanced layout containers');
 
@@ -394,4 +469,6 @@ foreach ([ChangeTask::class => Change::class, ProblemTask::class => Problem::cla
     check(Log::$entries[0]['type'] === $parentType && $DB->timers[0]['actual_actiontime'] === 1800, 'Additional task type: ' . $taskType);
 }
 
-echo "OK: $checks regression checks (GLPI adapters, no real database).\n";
+if (!defined('ACTUALTIME_EXTENDED_TEST')) {
+    echo "OK: $checks regression checks (GLPI adapters, no real database).\n";
+}

@@ -952,7 +952,7 @@ JAVASCRIPT;
                 $source->getFromDBByCrit([
                 'plugin_actualtime_tasks_id' => $row['id']
                 ]);
-                $comment = __("Original end date", "actualtime") . ": " . $source->fields['source_end'] . "<br>";
+                $comment = __("Original end date", "actualtime") . ": " . ($source->fields['source_end'] ?? __('In progress')) . "<br>";
                 $comment .= __("Original duration", "actualtime") . ": " . Html::timestampToString($source->fields['source_actiontime']) . "<br>";
                 $comment .= sprintf(__("First modification by %s", "actualtime"), getUserName($source->fields['users_id']));
                 $html .= Html::showToolTip($comment, ['display' => false]);
@@ -1395,6 +1395,25 @@ JAVASCRIPT;
      */
     public static function startTimer($task_id, $itemtype, $origin = self::AUTO): array
     {
+        return self::runTimerAction('start', $task_id, $itemtype, $origin);
+    }
+
+    /** Serialize native actions with timer edits so they use the current start. */
+    private static function runTimerAction(string $action, $task_id, $itemtype, $origin): array
+    {
+        try {
+            return PluginActualtimeManualtimer::withTaskLock($itemtype, $task_id, static function () use ($action, $task_id, $itemtype, $origin) {
+                $method = $action . 'TimerUnlocked';
+                return self::$method($task_id, $itemtype, $origin);
+            });
+        } catch (Throwable $error) {
+            Toolbox::logInFile('php-errors', 'ActualTime timer action: ' . $error->getMessage() . "\n");
+            return ['type' => 'warning', 'message' => __('Could not update the timer. Refresh the task and try again.', 'actualtime')];
+        }
+    }
+
+    private static function startTimerUnlocked($task_id, $itemtype, $origin): array
+    {
         /**
          * @var \DBmysql $DB
          * @var array $CFG_GLPI
@@ -1513,7 +1532,6 @@ JAVASCRIPT;
             $active_task_itemtype = '';
             $active_task_parent_id = 0;
             $active_task_parent_itemtype = '';
-            $DB = DBConnection::getReadConnection();
             $iterator = $DB->request([
                 'FROM'  => self::getTable(),
                 'WHERE' => [
@@ -1604,6 +1622,11 @@ JAVASCRIPT;
      * @return array
      */
     public static function pauseTimer($task_id, $itemtype, $origin = self::AUTO): array
+    {
+        return self::runTimerAction('pause', $task_id, $itemtype, $origin);
+    }
+
+    private static function pauseTimerUnlocked($task_id, $itemtype, $origin): array
     {
         /** @var \DBmysql $DB */
         global $DB;
@@ -1700,6 +1723,11 @@ JAVASCRIPT;
      * @return array
      */
     public static function stopTimer($task_id, $itemtype, $origin = self::AUTO): array
+    {
+        return self::runTimerAction('stop', $task_id, $itemtype, $origin);
+    }
+
+    private static function stopTimerUnlocked($task_id, $itemtype, $origin): array
     {
         /**
          * @var \DBmysql $DB
