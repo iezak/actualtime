@@ -35,6 +35,7 @@ class Plugin
 }
 class Html
 {
+    public static function cleanId($value) { return str_replace(['[', ']'], '_', $value); }
     public static function hidden($name, $options) {
         return '<input type="hidden" name="' . htmlescape($name) . '" value="' . htmlescape($options['value']) . '">';
     }
@@ -199,10 +200,30 @@ function addPeriod($begin = '2025-01-10 08:00:00', $end = '2025-01-10 08:30:00',
     return PluginActualtimeManualtimer::create($type, 10, $begin, $end);
 }
 
+if (($argv[1] ?? '') === '--render-calendar-fixture') {
+    resetFixture();
+    addPeriod();
+    echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">';
+    echo '<style>body{font:16px sans-serif;padding:16px}label{display:block}input{padding:8px;max-width:100%}.mb-3{margin-bottom:12px}.flatpickr-calendar{display:none!important}</style>';
+    echo '</head><body>';
+    (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
+    echo '</body></html>';
+    exit;
+}
+
+if (($argv[1] ?? '') === '--validate-calendar-values') {
+    echo json_encode(PluginActualtimeManualtimer::validateInterval($argv[2] ?? '', $argv[3] ?? ''));
+    exit;
+}
+
 resetFixture();
 $interval = PluginActualtimeManualtimer::validateInterval('2024-02-29 23:45:00', '2024-03-01 00:15:00');
 check($interval['actual_actiontime'] === 1800, 'Leap day and midnight duration');
 check(PluginActualtimeManualtimer::validateInterval('2025-01-10 08:00:01', '2025-01-10 08:00:02')['actual_actiontime'] === 1, 'Seconds retained');
+check(PluginActualtimeManualtimer::normalizeDateTime('2025-01-10T08:30') === '2025-01-10 08:30:00', 'Native minutes normalize to SQL seconds');
+check(PluginActualtimeManualtimer::normalizeDateTime('2025-01-10T08:30:45') === '2025-01-10 08:30:45', 'Native seconds retained');
+check(PluginActualtimeManualtimer::validateInterval('2024-02-29T23:45', '2024-03-01T00:15')['actual_actiontime'] === 1800, 'Native interval across midnight');
+check(PluginActualtimeManualtimer::validateInterval('2025-01-10T08:00', '2025-01-10 08:30:00')['actual_end'] === '2025-01-10 08:30:00', 'Native and GLPI inputs remain compatible');
 foreach ([
     ['', '2025-01-10 08:30:00'],
     [[], '2025-01-10 08:30:00'],
@@ -213,6 +234,9 @@ foreach ([
     ['2025-01-10 08:30:00', '2025-01-10 08:00:00'],
     ['1960-01-10 08:00:00', '1960-01-10 08:30:00'],
     ['2099-01-10 08:00:00', '2099-01-10 08:30:00'],
+    ['2025-02-29T08:00', '2025-03-01T08:30'],
+    ['2025-01-10T08:00:00Z', '2025-01-10T08:30:00Z'],
+    ['2025-01-10T08:00-03:00', '2025-01-10T08:30-03:00'],
 ] as [$begin, $end]) {
     rejects(fn() => PluginActualtimeManualtimer::validateInterval($begin, $end), 'Reject invalid date/range');
 }
@@ -230,6 +254,11 @@ check(count($DB->timers) === 1 && count(Log::$entries) === 1, 'Rejected requests
 addPeriod('2025-01-10 08:30:00', '2025-01-10 08:45:00');
 check(PluginActualtimeTask::totalEndTime(10, TicketTask::class) === 2700, 'Adjacent periods total 45 minutes');
 check(CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 2700, 'Accumulated duration updated');
+
+resetFixture();
+addPeriod('2025-01-10T08:00', '2025-01-10T08:30');
+check($DB->timers[0]['actual_begin'] === '2025-01-10 08:00:00' && $DB->timers[0]['actual_end'] === '2025-01-10 08:30:00', 'Native values stored in canonical format');
+check($DB->timers[0]['actual_actiontime'] === 1800 && CommonDBTM::$records[TicketTask::class][10]['actiontime'] === 1800, 'Native inputs update duration');
 
 resetFixture();
 addPeriod('2025-01-10 08:00:00', '2025-01-10 08:07:00');
@@ -299,6 +328,8 @@ ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
 check(str_contains($html, 'manual_begin') && str_contains($html, 'manual_end'), 'Creation form exists without old timers');
+check(substr_count($html, 'type="datetime-local"') === 2 && !str_contains($html, 'flatpickr'), 'Creation controls do not depend on calendar JavaScript');
+check(substr_count($html, 'step="1"') === 2 && substr_count($html, ' required') === 2, 'Creation controls keep seconds and required validation');
 check(str_contains($html, '_glpi_csrf_token') && str_contains($html, 'data-submit-once'), 'CSRF and submit-once markup');
 check(substr_count($html, '<form ') === substr_count($html, '</form>'), 'Balanced forms without timers');
 addPeriod();
@@ -306,6 +337,7 @@ ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
 check(str_contains($html, 'actual_end['), 'Existing timer editor retained');
+check(substr_count($html, 'type="datetime-local"') === 3 && str_contains($html, '2025-01-10T08:30:00'), 'Existing end date uses a native control');
 check(substr_count($html, '<form ') === 2 && substr_count($html, '</form>') === 2, 'Separate balanced forms');
 check(substr_count($html, '<div') === substr_count($html, '</div>'), 'Balanced layout containers');
 
@@ -317,7 +349,7 @@ $_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10] = [
 ob_start();
 (new PluginActualtimeSourcetimer())->modalForm(TicketTask::class, 10);
 $html = ob_get_clean();
-check(str_contains($html, '2025-01-10 08:30:00') && str_contains($html, '2025-01-10 08:00:00'), 'Rejected dates repopulate the form');
+check(str_contains($html, '2025-01-10T08:30:00') && str_contains($html, '2025-01-10T08:00:00'), 'Rejected dates repopulate native controls');
 check(!isset($_SESSION['plugin_actualtime_manualtimer'][TicketTask::class][10]), 'Form state is consumed per task');
 foreach ([ChangeTask::class => Change::class, ProblemTask::class => Problem::class] as $taskType => $parentType) {
     resetFixture();

@@ -1,6 +1,6 @@
 # ActualTime London — etapa 1
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.1-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.1-london.2**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -10,6 +10,11 @@ O botão **Modify timers** / **Modificar temporizadores** passa a oferecer
 **Adicionar apontamento manual**, inclusive quando a tarefa salva ainda não
 possui apontamentos. O início e o término são obrigatórios. O intervalo é salvo
 encerrado e aparece no histórico e nos totais nativos do ActualTime.
+
+A revisão **london.2** usa o calendário nativo do navegador para início, término
+e edição do término existente. A seleção deixa de depender da inicialização do
+Flatpickr dentro da janela. Os valores continuam sendo validados no servidor,
+com precisão de segundos e no mesmo fuso usado pelo GLPI.
 
 O tempo é atribuído ao técnico responsável pela tarefa. Se não houver técnico
 individual (ou em tarefas de projeto), é atribuído ao usuário que faz o lançamento.
@@ -45,7 +50,7 @@ da tarefa evita duplicatas em envios manuais simultâneos.
    no diretório de plugins utilizado pela sua instalação.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI e confirme a versão **3.2.1-london.1**.
+5. Limpe o cache do GLPI e confirme a versão **3.2.1-london.2**.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
 
@@ -92,6 +97,11 @@ espelho: os testes automatizados isolados não substituem essa homologação.
 Executar na raiz do plugin com PHP 8.1 ou posterior:
 
     php tests/regression/manualtimer.php
+
+Com Playwright/Chromium disponíveis, o teste de navegador abre o calendário
+nativo em uma janela com iframe e envia os formulários de criação e edição:
+
+    node tests/regression/calendar.browser.cjs
 
 Os testes executam o código do plugin com adaptadores em memória para os serviços
 do GLPI. Cobrem datas, autorização, persistência, arredondamento, duplicatas,

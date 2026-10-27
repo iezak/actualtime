@@ -1,5 +1,15 @@
 # Actualtime
 
+## [3.2.1-london.2] - 2026-10-27
+
+### Fixed
+
+- Use browser-native date/time controls in the timer editor, including the
+  existing end-date field, so selection does not depend on Flatpickr in an iframe.
+- Normalize browser-local ISO values to GLPI timestamps before validating,
+  comparing or saving, preserving seconds and the current server timezone.
+- Preserve submitted native date values after a validation error.
+
 ## [3.2.1-london.1] - 2026-10-27
 
 ### Added

@@ -179,6 +179,33 @@ JAVASCRIPT;
     }
 
     /**
+     * Native controls avoid a dependency on Flatpickr initialization in the iframe.
+     * The server normalizes their local ISO values before validating or saving.
+     */
+    public static function showDateTimeField(string $name, $value = '', bool $required = false, bool $past_only = false): void
+    {
+        $display_value = '';
+        if ($value !== '') {
+            try {
+                $display_value = str_replace(' ', 'T', PluginActualtimeManualtimer::normalizeDateTime($value));
+            } catch (InvalidArgumentException $error) {
+                // Leave invalid dates empty; never pass unvalidated attributes.
+            }
+        }
+        $id = 'actualtime_datetime_' . Html::cleanId($name);
+        echo '<input type="datetime-local" class="form-control" step="1"';
+        echo ' id="' . htmlescape($id) . '" name="' . htmlescape($name) . '"';
+        echo ' value="' . htmlescape($display_value) . '"';
+        if ($required) {
+            echo ' required';
+        }
+        if ($past_only) {
+            echo ' max="' . htmlescape(date('Y-m-d\TH:i:s')) . '"';
+        }
+        echo '>';
+    }
+
+    /**
      * modalForm
      *
      * @param  mixed $itemtype
@@ -201,22 +228,10 @@ JAVASCRIPT;
         echo "<form method='post' action='" . Plugin::getWebDir('actualtime') . "/front/manualtimer.form.php' data-submit-once>";
         echo Html::hidden('itemtype', ['value' => $itemtype]);
         echo Html::hidden('items_id', ['value' => $items_id]);
-        echo "<div class='mb-3'><label class='form-label'>" . __('Start date') . "</label>";
-        Html::showDateTimeField('manual_begin', [
-            'value' => $saved['manual_begin'] ?? '',
-            'required' => true,
-            'maybeempty' => false,
-            'timestep' => 1,
-            'maxdate' => date('Y-m-d H:i:s'),
-        ]);
-        echo "</div><div class='mb-3'><label class='form-label'>" . __('End date') . "</label>";
-        Html::showDateTimeField('manual_end', [
-            'value' => $saved['manual_end'] ?? '',
-            'required' => true,
-            'maybeempty' => false,
-            'timestep' => 1,
-            'maxdate' => date('Y-m-d H:i:s'),
-        ]);
+        echo "<div class='mb-3'><label class='form-label' for='actualtime_datetime_manual_begin'>" . __('Start date') . "</label>";
+        self::showDateTimeField('manual_begin', $saved['manual_begin'] ?? '', true, true);
+        echo "</div><div class='mb-3'><label class='form-label' for='actualtime_datetime_manual_end'>" . __('End date') . "</label>";
+        self::showDateTimeField('manual_end', $saved['manual_end'] ?? '', true, true);
         echo "</div><p>" . __('Technician') . ": ";
         echo htmlescape(getUserName(PluginActualtimeManualtimer::getTechnician($task))) . "</p>";
         echo "<button class='btn btn-primary' type='submit' name='add_manual' value='1'>";
@@ -250,9 +265,10 @@ JAVASCRIPT;
             echo "<div class='form-field row col-12 mb-2'>";
             echo "<label class='col-form-label col-2 text-xxl-end'>" . __('Start date') . "</label>";
             echo "<label class='col-form-label col-2'>" . htmlescape($data['actual_begin']) . "</label>";
-            echo "<label class='col-form-label col-2 text-xxl-end'>" . __('End date') . "</label>";
+            $field_id = 'actualtime_datetime_' . Html::cleanId('actual_end[' . $data['id'] . ']');
+            echo "<label class='col-form-label col-2 text-xxl-end' for='" . htmlescape($field_id) . "'>" . __('End date') . "</label>";
             echo "<div class='col-6  field-container'>";
-            Html::showDateTimeField('actual_end[' . $data['id'] . ']', ['value' => $data['actual_end']]);
+            self::showDateTimeField('actual_end[' . $data['id'] . ']', $data['actual_end']);
             echo "</div>";
 
             echo "</div>";
