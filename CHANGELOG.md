@@ -1,5 +1,31 @@
 # Actualtime
 
+## [3.2.4-london.1] - 2026-10-27
+
+### Added
+
+- London stage 4: allow a technician to run different tasks simultaneously while
+  keeping the shared task lock and one active timer per task.
+- Track each counter by task type and ID; pausing/ending one leaves others
+  running, including equal numeric IDs across different task types.
+- List all readable current-user timers in the popup and open the selected task
+  explicitly. Reconcile state after reload, focus, cross-tab actions and periodic
+  refresh, including when the popup setting is disabled.
+- Enforce task update and parent read access for web controls; retain assignment,
+  planning and existing integration checks. Native write failures now roll back.
+
+### Fixed
+
+- Resolve each start's parent from the selected task rather than the user's first
+  active timer, including the existing Gapp push payload.
+- Scope completion form updates to the selected task, preserve unrelated forms,
+  and reject stale client snapshots after actions.
+- Keep project-specific state fields and return its effective duration.
+- Pause only the reassigned task's old timer during the trusted assignment hook,
+  retaining its technician in the existing push payload.
+- Namespace timer/calendar modal IDs by task type and retain the original GLPI
+  calendar, manual creation, editing, deletion and database schema.
+
 ## [3.2.3-london.1] - 2026-10-27
 
 ### Added

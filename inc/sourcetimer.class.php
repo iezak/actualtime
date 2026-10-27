@@ -157,7 +157,7 @@ class PluginActualtimeSourcetimer extends CommonDBTM
         $task_id = $item->getID();
 
         $html = "<div class='dropdown ms-2'>";
-        $html .= "<a href='#' data-bs-toggle='modal' data-bs-target='#add_time_{$task_id}'>";
+        $html .= "<a href='#' data-bs-toggle='modal' data-bs-target='#add_time_{$itemtype}_{$task_id}'>";
         $html .= "<span class='fas fa-calendar-plus control_item' title='" . __("Modify timers", "actualtime");
         $html .= "'></span>";
         $html .= "</a></div>";
@@ -168,7 +168,7 @@ $(document).ready(function() {
 JAVASCRIPT;
         echo Html::scriptBlock($script);
         echo Ajax::createIframeModalWindow(
-            'add_time_' . $task_id,
+            'add_time_' . $itemtype . '_' . $task_id,
             Plugin::getWebDir('actualtime') . "/ajax/changetimer.php?itemtype=" . $itemtype . "&task_id=" . $task_id,
             [
                 'reloadonclose' => true,

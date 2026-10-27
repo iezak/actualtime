@@ -261,7 +261,7 @@ class PluginActualtimeTask extends CommonDBTM
                         }
 
                         $button_action1 = "<button type='button' class='btn btn-primary m-2'";
-                        $button_action1 .= " id='actualtime_button_{$task_id}_1_{$rand}'";
+                        $button_action1 .= " id='actualtime_button_{$itemtype}_{$task_id}_1_{$rand}'";
                         $button_action1 .= " action='$action1'";
                         $button_action1 .= " style='background-color:$color1;color:white'";
                         $button_action1 .= " $disabled1";
@@ -271,7 +271,7 @@ class PluginActualtimeTask extends CommonDBTM
                         $html_buttons .= $button_action1;
 
                         $button_action2 = "<button type='button' class='btn btn-primary m-2'";
-                        $button_action2 .= " id='actualtime_button_{$task_id}_2_{$rand}'";
+                        $button_action2 .= " id='actualtime_button_{$itemtype}_{$task_id}_2_{$rand}'";
                         $button_action2 .= " action='$action2'";
                         $button_action2 .= " style='background-color:$color2;color:white'";
                         $button_action2 .= " $disabled2";
@@ -283,11 +283,11 @@ class PluginActualtimeTask extends CommonDBTM
                         // Only task user have buttons
                         $script .= <<<JAVASCRIPT
 $(document).ready(function() {
-    $("#actualtime_button_{$task_id}_1_{$rand}").click(function(event) {
+    $("#actualtime_button_{$itemtype}_{$task_id}_1_{$rand}").click(function(event) {
         window.actualTime.pressedButton($task_id, "{$itemtype}", $(this).attr('action'));
     });
 
-    $("#actualtime_button_{$task_id}_2_{$rand}").click(function(event) {
+    $("#actualtime_button_{$itemtype}_{$task_id}_2_{$rand}").click(function(event) {
         window.actualTime.pressedButton($task_id, "{$itemtype}", $(this).attr('action'));
     });
 });
@@ -304,7 +304,7 @@ JAVASCRIPT;
                         $html .= "<div class='row center'>";
                         $html .= "<div class='col-12 col-md-7'>";
                         $html .= "<div class='b'>" . __("Actual Duration", 'actualtime') . "</div>";
-                        $html .= "<div id='actualtime_timer_{$task_id}_{$rand}' style='color:{$timercolor}'></div>";
+                        $html .= "<div id='actualtime_timer_{$itemtype}_{$task_id}_{$rand}' data-actualtime-task='{$itemtype}:{$task_id}' style='color:{$timercolor}'></div>";
                         $html .= "</div>";
                         $html .= "<div class='col-12 col-md-5'>";
                         $html .= "<div class='btn-group'>";
@@ -317,7 +317,7 @@ JAVASCRIPT;
                         $html .= "<div class='col-12 col-md-5'>" . __("Partial actual duration", 'actualtime') . "</div>";
                         $html .= "</div>";
 
-                        $html .= "<div id='actualtime_segment_{$task_id}_{$rand}'>";
+                        $html .= "<div id='actualtime_segment_{$itemtype}_{$task_id}_{$rand}'>";
                         $html .= self::getSegment($item->getID(), $itemtype);
                         $html .= "</div>";
 
@@ -326,7 +326,7 @@ JAVASCRIPT;
                         // Finally, fill the actual total time in all timers
                         $script .= <<<JAVASCRIPT
 $(document).ready(function() {
-    window.actualTime.fillCurrentTime($task_id, $time);
+    window.actualTime.fillCurrentTime($task_id, "{$itemtype}", $time);
 });
 JAVASCRIPT;
                         echo Html::scriptBlock($script);
@@ -431,17 +431,17 @@ JAVASCRIPT;
                             }
                         }
 
-                        $html_buttons .= "<button type='button' class='btn btn-primary m-2' id='actualtime_button_{$task_id}_1_{$rand}' action='$action1' style='background-color:$color1;color:white' $disabled1><span class='d-none d-md-block'>$value1</span></button>";
-                        $html_buttons .= "<button type='button' class='btn btn-primary m-2' id='actualtime_button_{$task_id}_2_{$rand}' action='$action2' style='background-color:$color2;color:white' $disabled2><span class='d-none d-md-block'><i class='fa-solid fa-stop'></i></span></button>";
+                        $html_buttons .= "<button type='button' class='btn btn-primary m-2' id='actualtime_button_{$itemtype}_{$task_id}_1_{$rand}' action='$action1' style='background-color:$color1;color:white' $disabled1><span class='d-none d-md-block'>$value1</span></button>";
+                        $html_buttons .= "<button type='button' class='btn btn-primary m-2' id='actualtime_button_{$itemtype}_{$task_id}_2_{$rand}' action='$action2' style='background-color:$color2;color:white' $disabled2><span class='d-none d-md-block'><i class='fa-solid fa-stop'></i></span></button>";
 
                        // Only task user have buttons
                         $script .= <<<JAVASCRIPT
 $(document).ready(function() {
-    $("#actualtime_button_{$task_id}_1_{$rand}").click(function(event) {
+    $("#actualtime_button_{$itemtype}_{$task_id}_1_{$rand}").click(function(event) {
     window.actualTime.pressedButton($task_id, "{$itemtype}", $(this).attr('action'));
     });
 
-    $("#actualtime_button_{$task_id}_2_{$rand}").click(function(event) {
+    $("#actualtime_button_{$itemtype}_{$task_id}_2_{$rand}").click(function(event) {
     window.actualTime.pressedButton($task_id, "{$itemtype}", $(this).attr('action'));
     });
 });
@@ -457,7 +457,7 @@ JAVASCRIPT;
                     ) {
                         if (PluginActualtimeSourcetimer::canModify($itemtype, $task_id)) {
                             $html .= "<div class='dropdown ms-2'>";
-                            $html .= "<a href='#' data-bs-toggle='modal' data-bs-target='#add_time_{$task_id}'>";
+                            $html .= "<a href='#' data-bs-toggle='modal' data-bs-target='#add_time_{$itemtype}_{$task_id}'>";
                             $html .= "<span class='fas fa-calendar-plus control_item' title='" . __("Modify timers", "actualtime") . "'></span>";
                             $html .= "</a></div>";
                         }
@@ -465,7 +465,7 @@ JAVASCRIPT;
                         $html .= "<div class='row center'>";
                         $html .= "<div class='col-12 col-md-7'>";
                         $html .= "<div class='b'>" . __("Actual Duration", 'actualtime') . "</div>";
-                        $html .= "<div id='actualtime_timer_{$task_id}_{$rand}' style='color:{$timercolor}'></div>";
+                        $html .= "<div id='actualtime_timer_{$itemtype}_{$task_id}_{$rand}' data-actualtime-task='{$itemtype}:{$task_id}' style='color:{$timercolor}'></div>";
                         $html .= "</div>";
                         $html .= "<div class='col-12 col-md-5'>";
                         $html .= "<div class='btn-group'>";
@@ -478,7 +478,7 @@ JAVASCRIPT;
                         $html .= "<div class='col-12 col-md-5'>" . __("Partial actual duration", 'actualtime') . "</div>";
                         $html .= "</div>";
 
-                        $html .= "<div id='actualtime_segment_{$task_id}_{$rand}'>";
+                        $html .= "<div id='actualtime_segment_{$itemtype}_{$task_id}_{$rand}'>";
                         $html .= self::getSegment($item->getID(), $itemtype);
                         $html .= "</div>";
 
@@ -487,7 +487,7 @@ JAVASCRIPT;
                        // Finally, fill the actual total time in all timers
                         $script .= <<<JAVASCRIPT
 $(document).ready(function() {
-    window.actualTime.fillCurrentTime($task_id, $time);
+    window.actualTime.fillCurrentTime($task_id, "{$itemtype}", $time);
 });
 JAVASCRIPT;
                         echo Html::scriptBlock($script);
@@ -1059,24 +1059,7 @@ JAVASCRIPT;
      */
     public static function postShowTab($params): void
     {
-        if ($itemtype = self::getItemtype(Session::getLoginUserID())) {
-            $task = getItemForItemtype($itemtype);
-            if (is_a($task, CommonDBChild::class, true)) {
-                $parent = getItemForItemtype($task::$itemtype);
-            } else {
-                $parent = getItemForItemtype($task->getItilObjectItemType());
-            }
-            if ($parent_id = PluginActualtimeTask::getParent(Session::getLoginUserID())) {
-                $link = $parent->getFormURLWithID($parent_id);
-                $name = $parent->getTypeName(1);
-                $script = <<<JAVASCRIPT
-$(document).ready(function(){
-    window.actualTime.showTimerPopup($parent_id, '{$link}', '{$name}');
-});
-JAVASCRIPT;
-                echo Html::scriptBlock($script);
-            }
-        }
+        echo Html::scriptBlock('$(function () { window.actualTime.refresh(); });');
     }
 
     /**
@@ -1119,15 +1102,15 @@ JAVASCRIPT;
                     if (countElementsInTable(self::getTable(), ['items_id' => $task_id, 'itemtype' => $itemtype, 'is_modified' => 1]) > 0) {
                         $italic = 'font-style: italic;';
                     }
-                    $icon = "<span class='badge text-wrap ms-1 d-none d-md-block' style='color:{$timercolor};{$italic}'><i id='actualtime_faclock_{$task_id}_{$rand}' class='fa{$fa_icon}'></i> <span id='actualtime_timer_{$task_id}_box_{$rand}'></span></span>";
-                    echo "<div id='actualtime_anchor_{$task_id}_{$rand}'></div>";
+                    $icon = "<span class='badge text-wrap ms-1 d-none d-md-block' style='color:{$timercolor};{$italic}'><i id='actualtime_faclock_{$itemtype}_{$task_id}_{$rand}' class='fa{$fa_icon}'></i> <span id='actualtime_timer_{$itemtype}_{$task_id}_box_{$rand}' data-actualtime-task='{$itemtype}:{$task_id}'></span></span>";
+                    echo "<div id='actualtime_anchor_{$itemtype}_{$task_id}_{$rand}'></div>";
                     $script = <<<JAVASCRIPT
 $(document).ready(function() {
-    if ($("[id^='actualtime_faclock_{$task_id}_']").length == 0) {
+    if ($("[id^='actualtime_faclock_{$itemtype}_{$task_id}_']").length == 0) {
         $("div[data-itemtype='{$itemtype}'][data-items-id='{$task_id}'] div.card-body div.timeline-header div.creator")
             .append("{$icon}");
             if ($time > 0) {
-            window.actualTime.fillCurrentTime($task_id, $time);
+            window.actualTime.fillCurrentTime($task_id, "{$itemtype}", $time);
         }
     }
 });
@@ -1140,7 +1123,7 @@ JAVASCRIPT;
                    // Open edit window automatically
                     $parent_item = getItemForItemtype($item->getItilObjectItemType());
                     $ticket_id = $item->fields[$parent_item::getForeignKeyField()];
-                    $div = "<div id='actualtime_autoEdit_{$task_id}_{$rand}' onclick='javascript:viewEditSubitem$ticket_id$rand(event, \"{$itemtype}\", $task_id, this, \"viewitem{$itemtype}$task_id$rand\")'></div>";
+                    $div = "<div id='actualtime_autoEdit_{$itemtype}_{$task_id}_{$rand}' onclick='javascript:viewEditSubitem$ticket_id$rand(event, \"{$itemtype}\", $task_id, this, \"viewitem{$itemtype}$task_id$rand\")'></div>";
                     echo $div;
                     $script = <<<JAVASCRIPT
 $(document).ready(function() {
@@ -1177,13 +1160,13 @@ JAVASCRIPT;
                             $disabled1 = '';
                         }
                     }
-                    $button = "<div class='ms-auto col-auto'><button type='button' class='btn btn-icon btn-sm mt-1' id='actualtime_button_{$task_id}_1_{$rand}' action='$action1' style='background-color:$color1;color:white;width: 20px;height: 20px;' $disabled1><span class='d-none d-md-block'>$value1</span></button></div>";
+                    $button = "<div class='ms-auto col-auto'><button type='button' class='btn btn-icon btn-sm mt-1' id='actualtime_button_{$itemtype}_{$task_id}_1_{$rand}' action='$action1' style='background-color:$color1;color:white;width: 20px;height: 20px;' $disabled1><span class='d-none d-md-block'>$value1</span></button></div>";
                     $script = <<<JAVASCRIPT
 $(document).ready(function() {
-    if ($("[id^='actualtime_button_{$task_id}_1_{$rand}']").length == 0) {
+    if ($("[id^='actualtime_button_{$itemtype}_{$task_id}_1_{$rand}']").length == 0) {
         $("div[data-itemtype='{$itemtype}'][data-items-id='{$task_id}'] div.todo-list-state").append("{$button}");
     }
-    $("#actualtime_button_{$task_id}_1_{$rand}").click(function(event) {
+    $("#actualtime_button_{$itemtype}_{$task_id}_1_{$rand}").click(function(event) {
         window.actualTime.pressedButton($task_id, "{$itemtype}", $(this).attr('action'));
     });
 });
@@ -1403,8 +1386,23 @@ JAVASCRIPT;
     {
         try {
             return PluginActualtimeManualtimer::withTaskLock($itemtype, $task_id, static function () use ($action, $task_id, $itemtype, $origin) {
+                if ($origin !== self::AUTO) {
+                    ['task' => $task, 'parent' => $parent] = PluginActualtimeRuntime::taskContext($itemtype, $task_id, UPDATE);
+                    if (!PluginActualtimeRuntime::canControl($task)) {
+                        return ['type' => 'warning', 'message' => __('You do not have permission to control this timer.', 'actualtime')];
+                    }
+                    if ($action === 'start' && $parent instanceof CommonITILObject && (int)$parent->fields['status'] >= CommonITILObject::SOLVED) {
+                        return ['type' => 'warning', 'message' => __('Task completed.')];
+                    }
+                }
                 $method = $action . 'TimerUnlocked';
-                return self::$method($task_id, $itemtype, $origin);
+                $result = self::$method($task_id, $itemtype, $origin);
+                $result['task_id'] = (int)$task_id;
+                $result['itemtype'] = $itemtype;
+                if ($origin !== self::AUTO && $result['type'] === 'info') {
+                    $result['runtime'] = PluginActualtimeRuntime::taskState($itemtype, $task_id);
+                }
+                return $result;
             });
         } catch (Throwable $error) {
             Toolbox::logInFile('php-errors', 'ActualTime timer action: ' . $error->getMessage() . "\n");
@@ -1519,97 +1517,47 @@ JAVASCRIPT;
             return $result;
         }
 
-        if (!self::checkUserFree(Session::getLoginUserID())) {
-            if (is_a($task, CommonDBChild::class, true)) {
-                $parent = getItemForItemtype($task::$itemtype);
-            } else {
-                $parent = getItemForItemtype($task->getItilObjectItemType());
-            }
-            $parent_key = $parent->getForeignKeyField();
-            $parent_id = $task->fields[$parent_key];
-
-            $active_task_id = 0;
-            $active_task_itemtype = '';
-            $active_task_parent_id = 0;
-            $active_task_parent_itemtype = '';
-            $iterator = $DB->request([
-                'FROM'  => self::getTable(),
-                'WHERE' => [
-                    'users_id'      => Session::getLoginUserID(),
-                    'actual_end'    => null,
-                ],
-                'LIMIT' => 1
-            ]);
-            if ($row = $iterator->current()) {
-                // Active task found, get its id and itemtype
-                $active_task_id = $row['items_id'];
-                $active_task_itemtype = $row['itemtype'];
-                $tmp_task = new $active_task_itemtype();
-                if ($tmp_task->getFromDB($active_task_id)) {
-                    // get parent id and itemtype, allowing TicketTask, ProjectTask, ChangeTask..
-                    $dbu = new DbUtils();
-                    $active_task_parent_itemtype = $tmp_task->getItilObjectItemType();
-                    $tmp_parent_table = $dbu->getTableForItemType($active_task_parent_itemtype);
-                    $tmp_key = $dbu->getForeignKeyFieldForTable($tmp_parent_table);
-                    $active_task_parent_id = $tmp_task->fields[$tmp_key] ?? 0;
-                }
-            }
-
-            $message = __('Error');
-            if ($active_task_parent_itemtype != "" && $active_task_parent_id > 0) {
-                $url = (new $active_task_parent_itemtype())->getFormURLWithID($active_task_parent_id);
-                $message = sprintf(__('You are already working on %s', 'actualtime'), $active_task_parent_itemtype);
-                $link = '<a href="' . $url . '">#' . $active_task_parent_id . '</a>';
-                $message .= ' ' . $link;
-                if ($active_task_id > 0) {
-                    $message .= ' (' . __('Task') . ' #' . $active_task_id . ')';
-                }
-            }
-
-            $result['message'] = $message;
-            return $result;
-        } else {
-           // action=start, timer=off, current user is free
-            $DB->insert(
-                'glpi_plugin_actualtime_tasks',
-                [
-                    'items_id'       => $task_id,
-                    'itemtype'       => $itemtype,
-                    'actual_begin'   => date("Y-m-d H:i:s"),
-                    'users_id'       => Session::getLoginUserID(),
-                    'origin_start'   => $origin,
-                ]
-            );
-
-            $timer_id = $DB->insertId();
-            if (is_a($task, CommonDBChild::class, true)) {
-                $parent = getItemForItemtype($task::$itemtype);
-            } else {
-                $parent = getItemForItemtype($task->getItilObjectItemType());
-            }
-            $parent_id = self::getParent(Session::getLoginUserID());
-            $result = [
-                'message'   => __("Timer started", 'actualtime'),
-                'type'      => 'info',
-                'timer_id'  => $timer_id,
-                'parent_id' => $parent_id,
-                'time'      => abs(self::totalEndTime($task_id, $itemtype)),
-                'link'      => $parent::getFormURLWithID($parent_id),
-                'name'      => $parent::getTypeName(1),
-            ];
-
-            if ($plugin->isActivated('gappextended')) {
-                PluginGappextendedPush::sendActualtime(
-                    self::getParent(Session::getLoginUserID()),
-                    $task_id,
-                    $result,
-                    Session::getLoginUserID(),
-                    true,
-                    $parent::getType()
-                );
-            }
+       // Different tasks may run together; the task lock prevents a duplicate here.
+        if (!$DB->insert(
+            'glpi_plugin_actualtime_tasks',
+            [
+                'items_id'       => $task_id,
+                'itemtype'       => $itemtype,
+                'actual_begin'   => date("Y-m-d H:i:s"),
+                'users_id'       => Session::getLoginUserID(),
+                'origin_start'   => $origin,
+            ]
+        )) {
+            throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
         }
 
+        $timer_id = $DB->insertId();
+        if (is_a($task, CommonDBChild::class, true)) {
+            $parent = getItemForItemtype($task::$itemtype);
+        } else {
+            $parent = getItemForItemtype($task->getItilObjectItemType());
+        }
+        $parent_id = (int)$task->fields[$parent->getForeignKeyField()];
+        $result = [
+            'message'   => __("Timer started", 'actualtime'),
+            'type'      => 'info',
+            'timer_id'  => $timer_id,
+            'parent_id' => $parent_id,
+            'time'      => abs(self::totalEndTime($task_id, $itemtype)),
+            'link'      => $parent::getFormURLWithID($parent_id),
+            'name'      => $parent::getTypeName(1),
+        ];
+
+        if ($plugin->isActivated('gappextended')) {
+            PluginGappextendedPush::sendActualtime(
+                $parent_id,
+                $task_id,
+                $result,
+                Session::getLoginUserID(),
+                true,
+                $parent::getType()
+            );
+        }
         return $result;
     }
 
@@ -1637,7 +1585,7 @@ JAVASCRIPT;
 
         $plugin = new Plugin();
         if (self::checkTimerActive($task_id, $itemtype)) {
-            if (self::checkUser($task_id, $itemtype, Session::getLoginUserID())) {
+            if (self::checkUser($task_id, $itemtype, Session::getLoginUserID()) || $origin === self::AUTO) {
                 $actual_begin = self::getActualBegin($task_id, $itemtype);
                 $seconds = (strtotime(date("Y-m-d H:i:s")) - strtotime($actual_begin));
                 $actualtime = new self();
@@ -1650,7 +1598,7 @@ JAVASCRIPT;
                     'actual_end' => null,
                 ]);
                 $timer_id = $actualtime->getID();
-                $DB->update(
+                if (!$DB->update(
                     'glpi_plugin_actualtime_tasks',
                     [
                         'actual_end'        => date("Y-m-d H:i:s"),
@@ -1665,7 +1613,9 @@ JAVASCRIPT;
                         ],
                         'actual_end' => null,
                     ]
-                );
+                )) {
+                    throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+                }
 
                 $result = [
                     'message'  => __("Timer completed", 'actualtime'),
@@ -1687,7 +1637,7 @@ JAVASCRIPT;
                         $task->fields[getForeignKeyFieldForItemType($parent)],
                         $task_id,
                         $result,
-                        Session::getLoginUserID(),
+                        $actualtime->fields['users_id'],
                         false,
                         $parent
                     );
@@ -1752,7 +1702,7 @@ JAVASCRIPT;
                     'actual_end' => null,
                 ]);
                 $timer_id = $actualtime->getID();
-                $DB->update(
+                if (!$DB->update(
                     'glpi_plugin_actualtime_tasks',
                     [
                         'actual_end'        => date("Y-m-d H:i:s"),
@@ -1767,13 +1717,17 @@ JAVASCRIPT;
                         ],
                         'actual_end' => null,
                     ]
-                );
+                )) {
+                    throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
+                }
 
                 $input = [];
                 $task = new $itemtype();
                 $task->getFromDB($task_id);
                 $input['id'] = $task_id;
-                $input['state'] = 2;
+                if (isset($task->fields['state'])) {
+                    $input['state'] = 2;
+                }
                 $input['plugin_actualtime'] = true;
                 if ($config->autoUpdateDuration()) {
                     $totalendtime = PluginActualtimeTask::totalEndTime($task_id, $itemtype);
@@ -1785,14 +1739,16 @@ JAVASCRIPT;
                         $input['effective_duration'] = $ceil;
                     }
                 }
-                $task->update($input);
+                if (!$task->update($input)) {
+                    throw new RuntimeException(__('Could not update the task duration.', 'actualtime'));
+                }
 
                 $result = [
                     'message'   => __("Timer completed", 'actualtime'),
                     'type'      => 'info',
                     'segment'   => PluginActualtimeTask::getSegment($task_id, $itemtype),
                     'time'      => abs(PluginActualtimeTask::totalEndTime($task_id, $itemtype)),
-                    'task_time' => $task->getField('actiontime'),
+                    'task_time' => $task->getField('actiontime') ?? $task->getField('effective_duration'),
                     'timer_id'  => $timer_id,
                 ];
 
@@ -1831,7 +1787,9 @@ JAVASCRIPT;
             $task = new $itemtype();
             $task->getFromDB($task_id);
             $input['id'] = $task_id;
-            $input['state'] = 2;
+            if (isset($task->fields['state'])) {
+                $input['state'] = 2;
+            }
             $input['pending'] = 0;
             $input['plugin_actualtime'] = true;
             if ($config->autoUpdateDuration()) {
@@ -1844,14 +1802,16 @@ JAVASCRIPT;
                     $input['effective_duration'] = $ceil;
                 }
             }
-            $task->update($input);
+            if (!$task->update($input)) {
+                throw new RuntimeException(__('Could not update the task duration.', 'actualtime'));
+            }
 
             $result = [
                 'message'   => __("Timer completed", 'actualtime'),
                 'type'      => 'info',
                 'segment'   => PluginActualtimeTask::getSegment($task_id, $itemtype),
                 'time'      => abs(PluginActualtimeTask::totalEndTime($task_id, $itemtype)),
-                'task_time' => $task->getField('actiontime'),
+                'task_time' => $task->getField('actiontime') ?? $task->getField('effective_duration'),
                 'timer_id'  => 0,
             ];
         }

@@ -20,6 +20,29 @@ msgstr "Informe o início e o término do período trabalhado."
 msgid "Existing timers"
 msgstr "Apontamentos existentes"
 
+msgid "You do not have permission to control this timer."
+msgstr "Você não tem permissão para controlar este cronômetro."
+
+#, php-format
+msgid "Running tasks (%d)"
+msgstr "Tarefas em execução (%d)"
+
+#, php-format
+msgid "Task #%d"
+msgstr "Tarefa #%d"
+
+msgid "Start timer"
+msgstr "Iniciar cronômetro"
+
+msgid "Pause timer"
+msgstr "Pausar cronômetro"
+
+msgid "Resume timer"
+msgstr "Retomar cronômetro"
+
+msgid "Stop timer"
+msgstr "Encerrar cronômetro"
+
 msgid "Delete timer"
 msgstr "Excluir apontamento"
 

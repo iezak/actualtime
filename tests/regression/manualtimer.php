@@ -31,6 +31,7 @@ class Session
     public static function getLoginUserID() { return self::$user; }
     public static function haveRight($name, $right) { return self::$right; }
     public static function getNewCSRFToken() { return 'test-token'; }
+    public static function getCurrentInterface() { return 'central'; }
 }
 class Plugin
 {
@@ -69,13 +70,16 @@ if (getenv('ACTUALTIME_GLPI_CORE')) {
         }
         public static function timestampToString($seconds) { return (string)$seconds; }
         public static function showToolTip($content, $options = []) { return ''; }
+        public static function scriptBlock($script) { return '<script>' . $script . '</script>'; }
     }
 }
 class CommonDBTM
 {
     public $fields = [];
+    public $input = [];
     public static $records = [];
     public static $denied = [];
+    public static $deniedUpdate = [];
     public static $failUpdate = false;
     public function getFromDB($id) {
         $this->fields = self::$records[static::class][(int)$id] ?? [];
@@ -87,7 +91,8 @@ class CommonDBTM
         return !empty($this->fields);
     }
     public function can($id, $right) {
-        return $this->getFromDB($id) && !in_array(static::class . ':' . $id, self::$denied, true);
+        return $this->getFromDB($id) && !in_array(static::class . ':' . $id, self::$denied, true)
+            && ($right !== UPDATE || !in_array(static::class . ':' . $id, self::$deniedUpdate, true));
     }
     public function getField($name) { return $this->fields[$name] ?? null; }
     public function getID() { return $this->fields['id']; }
@@ -250,6 +255,7 @@ class MemoryDB
 require GLPI_ROOT . '/inc/task.class.php';
 require GLPI_ROOT . '/inc/sourcetimer.class.php';
 require GLPI_ROOT . '/inc/manualtimer.class.php';
+require GLPI_ROOT . '/inc/runtime.class.php';
 $checks = 0;
 function check($condition, $message) {
     global $checks;
@@ -273,6 +279,7 @@ function resetFixture() {
     Session::$user = 7;
     Plugin::$active = true;
     CommonDBTM::$denied = [];
+    CommonDBTM::$deniedUpdate = [];
     CommonDBTM::$failUpdate = false;
     Log::$entries = [];
     Log::$fail = false;
@@ -365,6 +372,10 @@ if (($argv[1] ?? '') === '--apply-edit-fixture') {
 if (($argv[1] ?? '') === '--validate-calendar-values') {
     echo json_encode(PluginActualtimeManualtimer::validateInterval($argv[2] ?? '', $argv[3] ?? ''));
     exit;
+}
+
+if (defined('ACTUALTIME_FIXTURE_ONLY')) {
+    return;
 }
 
 resetFixture();

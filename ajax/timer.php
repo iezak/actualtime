@@ -30,125 +30,65 @@
  */
 
 include("../../../inc/includes.php");
-
-header("Content-Type: text/html; charset=UTF-8");
 Html::header_nocache();
-
 Session::checkLoginUser();
+if (!(new Plugin())->isActivated('actualtime')) {
+    Html::displayRightError();
+}
 
-/** @var array $CFG_GLPI */
-global $CFG_GLPI;
-
-if (isset($_POST["action"])) {
-    $plugin = new Plugin();
-    $task_id = $_POST["task_id"];
-    $itemtype = $_POST["itemtype"];
-    $config = new PluginActualtimeConfig();
-    switch ($_POST["action"]) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    header("Content-Type: application/json; charset=UTF-8");
+    $type = $_POST['itemtype'] ?? null;
+    $task_id = $_POST['task_id'] ?? null;
+    switch ($_POST['action']) {
         case 'start':
-            $result = PluginActualtimeTask::startTimer($_POST["task_id"], $itemtype, PluginActualtimeTask::WEB);
-            echo json_encode($result);
+            $result = PluginActualtimeTask::startTimer($task_id, $type, PluginActualtimeTask::WEB);
             break;
         case 'end':
-            $result = PluginActualtimeTask::stopTimer($_POST["task_id"], $itemtype, PluginActualtimeTask::WEB);
-            echo json_encode($result);
+            $result = PluginActualtimeTask::stopTimer($task_id, $type, PluginActualtimeTask::WEB);
             break;
         case 'pause':
-            $result = PluginActualtimeTask::pauseTimer($_POST["task_id"], $itemtype, PluginActualtimeTask::WEB);
-            echo json_encode($result);
+            $result = PluginActualtimeTask::pauseTimer($task_id, $type, PluginActualtimeTask::WEB);
             break;
         case 'count':
-            echo abs(PluginActualtimeTask::totalEndTime($task_id, $itemtype));
-            break;
-    }
-} elseif (isset($_GET["footer"])) {
-   // Base function for all general stuff in javascript
-   // Translations
-    $result = [];
-    $result['rand']         = mt_rand();
-   //TRANS: d is a symbol for days in a time (displays: 3d)
-    $result['symb_d']       = __("%dd", "actualtime");
-    $result['symb_day']     = _n("%d day", "%d days", 1);
-    $result['symb_days']    = _n("%d day", "%d days", 2);
-   //TRANS: h is a symbol for hours in a time (displays: 3h)
-    $result['symb_h']       = __("%dh", "actualtime");
-    $result['symb_hour']    = _n("%d hour", "%d hours", 1);
-    $result['symb_hours']   = _n("%d hour", "%d hours", 2);
-   //TRANS: min is a symbol for minutes in a time (displays: 3min)
-    $result['symb_min']     = __("%dmin", "actualtime");
-    $result['symb_minute']  = _n("%d minute", "%d minutes", 1);
-    $result['symb_minutes'] = _n("%d minute", "%d minutes", 2);
-   //TRANS: s is a symbol for seconds in a time (displays: 3s)
-    $result['symb_s']       = __("%ds", "actualtime");
-    $result['symb_second']  = _n("%d second", "%d seconds", 1);
-    $result['symb_seconds'] = _n("%d second", "%d seconds", 2);
-    $result['text_warning'] = __('Warning');
-    $result['text_pause']   = "<i class='fa-solid fa-pause'></i>";
-    $result['text_restart'] = "<i class='fa-solid fa-forward'></i>";
-    $result['text_done']    = __('Done');
-   // Current user active task. Data to timer popup
-    $config = new PluginActualtimeConfig();
-    if ($config->showTimerPopup()) {
-       // popup_div exists only if settings allow display pop-up timer
-        $popup_div = "<div id='actualtime_popup'>" . __("Timer started on", 'actualtime');
-        $popup_div .= " <a onclick='window.actualTime.showTaskForm(event)' href='%l'>%n #%t</a> -> <span></span></div>";
-        $result['popup_div'] = $popup_div;
-        $task_id = PluginActualtimeTask::getTask(Session::getLoginUserID());
-        if ($task_id) {
-           // Only if timer is active
-            $result['task_id'] = $task_id;
-            $result['itemtype'] = PluginActualtimeTask::getItemtype(Session::getLoginUserID());
-            $task = getItemForItemtype($result['itemtype']);
-            if (is_a($task, CommonDBChild::class, true)) {
-                $parent = getItemForItemtype($task::$itemtype);
-            } else {
-                $parent = getItemForItemtype($task->getItilObjectItemType());
+            try {
+                PluginActualtimeRuntime::taskContext($type, $task_id);
+                $result = max(0, PluginActualtimeTask::totalEndTime($task_id, $type));
+            } catch (InvalidArgumentException | RuntimeException $error) {
+                Html::displayRightError();
             }
-            $result['parent_id'] = PluginActualtimeTask::getParent(Session::getLoginUserID());
-            $parent->getFromDB($result['parent_id']);
-            $result['link'] = $parent->getLinkURL();
-            $result['name'] = $parent->getTypeName(1);
-            $result['time'] = abs(PluginActualtimeTask::totalEndTime($task_id, $result['itemtype']));
-        }
+            break;
+        default:
+            http_response_code(400);
+            $result = ['type' => 'warning', 'message' => __('Invalid timer task.', 'actualtime')];
     }
     echo json_encode($result);
-} else {
-   // For modal windows
-    $parts = parse_url($_SERVER['REQUEST_URI']);
-    $query = [];
-    if (isset($parts['query'])) {
-        parse_str($parts['query'], $query);
-    }
-    if (isset($query['showform'])) {
-        $task_id = PluginActualtimeTask::getTask(Session::getLoginUserID());
-        $itemtype = PluginActualtimeTask::getItemtype(Session::getLoginUserID());
-        if ($task_id == 0 || $itemtype == '') {
-            exit;
-        }
-        $item = getItemForItemtype($itemtype);
-        $item->getFromDB($task_id);
-        $rand = mt_rand();
-        if (is_a($item, CommonDBChild::class, true)) {
-            $parent = getItemForItemtype($item::$itemtype);
-        } else {
-            $parent = getItemForItemtype($item->getItilObjectItemType());
-        }
-        $parent->getFromDB(PluginActualtimeTask::getParent(Session::getLoginUserID()));
-        $options['parent'] = $parent;
-        echo  "<div class='modal-header'>";
-        echo "<h4 class='modal-title'>" . __('Update of a task') . "</h4>";
-        echo "<button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='" . __("Close") . "'>";
-        echo "</button>";
-        echo "</div>";
-        echo "<div class='modal-body'>";
-        echo "<div class='center'>";
-        $redirect = strtolower($parent->getType());
-        $redirect .= "_" . PluginActualtimeTask::getParent(Session::getLoginUserID());
-        $url = $CFG_GLPI['url_base'] . "/index.php" . "?redirect=" . $redirect . "&noAUTO=1";
-        echo "<a class='btn btn-outline-secondary' href='" . urldecode($url) . "'>";
-        echo "<i class='ti ti-eye'></i><span>" . __s("View this item in its context") . "</span></a>";
-        echo "</div><hr>";
-        $item->showForm($task_id, $options);
-        echo "</div>";
-    }
+    exit;
 }
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['footer'])) {
+    header("Content-Type: application/json; charset=UTF-8");
+    $raw = $_GET['watch'] ?? '';
+    $watch = is_string($raw) && strlen($raw) <= 16384 ? json_decode($raw, true) : [];
+    echo json_encode(PluginActualtimeRuntime::footerData(is_array($watch) ? $watch : []));
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'GET' || !isset($_GET['showform'])) {
+    Html::displayRightError();
+}
+$itemtype = $_GET['itemtype'] ?? null;
+$task_id = $_GET['task_id'] ?? null;
+try {
+    ['task' => $item, 'parent' => $parent] = PluginActualtimeRuntime::taskContext($itemtype, $task_id);
+} catch (InvalidArgumentException | RuntimeException $error) {
+    Html::displayRightError();
+}
+header("Content-Type: text/html; charset=UTF-8");
+echo "<div class='modal-header'><h4 class='modal-title'>" . __('Update of a task') . " #" . (int)$task_id . "</h4>";
+echo "<button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='" . __s('Close') . "'></button></div>";
+echo "<div class='modal-body'><div class='center'>";
+echo "<a class='btn btn-outline-secondary' href='" . htmlspecialchars($parent->getFormURLWithID($parent->getID()), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "'>";
+echo "<i class='ti ti-eye'></i><span>" . __s("View this item in its context") . "</span></a></div><hr>";
+$item->showForm((int)$task_id, ['parent' => $parent]);
+echo "</div>";
