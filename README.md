@@ -1,5 +1,9 @@
 # ActualTime
 
+> **Fork London — GLPI 10 / base 3.2.0.** A etapa 1 adiciona apontamentos
+> manuais ao Modify timers. Veja o [guia de atualização e testes](docs/LONDON.md).
+> As alterações para tarefas simultâneas serão entregues em etapas posteriores.
+
 <img src="https://raw.githubusercontent.com/ticgal/actualtime/multimedia/actualtime.png" alt="ActualTime Logo" height="250px" width="250px" class="js-lazy-loaded">
 
 [![License](https://img.shields.io/badge/License-GNU%20AGPLv3-blue.svg?style=flat-square)](https://github.com/ticgal/actualtime/blob/master/LICENSE)

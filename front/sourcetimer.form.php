@@ -31,8 +31,13 @@
 
 include("../../../inc/includes.php");
 
-if (!isset($_POST["itemtype"])) {
-    Html::back();
+Session::checkLoginUser();
+
+if (
+    !(new Plugin())->isActivated('actualtime')
+    || !PluginActualtimeSourcetimer::canModify($_POST['itemtype'] ?? null, $_POST['items_id'] ?? null)
+) {
+    Html::displayRightError();
 }
 if (
     PluginActualtimeSourcetimer::checkItemtypeRight($_POST["itemtype"])
@@ -40,10 +45,15 @@ if (
 ) {
     if (isset($_POST["update"])) {
         $config = new PluginActualtimeConfig();
-        foreach ($_POST['actual_end'] as $key => $value) {
-            if (!empty($value)) {
+        foreach ((array)($_POST['actual_end'] ?? []) as $key => $value) {
+            if (is_string($value) && $value !== '') {
                 $actualtime = new PluginActualtimeTask();
-                if ($actualtime->getFromDB($key)) {
+                if (
+                    $actualtime->getFromDB($key)
+                    && $actualtime->fields['itemtype'] === $_POST['itemtype']
+                    && (int)$actualtime->fields['items_id'] === (int)$_POST['items_id']
+                    && !empty($actualtime->fields['actual_end'])
+                ) {
                     if ($value != $actualtime->fields['actual_end'] && $value > $actualtime->fields['actual_begin']) {
                         $seconds = (strtotime($value) - strtotime($actualtime->fields['actual_begin']));
                         $input = [

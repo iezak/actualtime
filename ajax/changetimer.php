@@ -36,18 +36,20 @@ Html::header_nocache();
 
 Session::checkLoginUser();
 
-if (isset($_REQUEST["itemtype"]) && isset($_REQUEST["task_id"])) {
-    if (PluginActualtimeSourcetimer::checkItemtypeRight($_REQUEST["itemtype"])) {
-        Html::popHeader(
-            PluginActualtimeSourcetimer::getTypeName(1),
-            $_SERVER['PHP_SELF'],
-            false,
-            '',
-            '',
-            PluginActualtimeSourcetimer::getType()
-        );
-        $source = new PluginActualtimeSourcetimer();
-        $source->modalForm($_REQUEST["itemtype"], $_REQUEST["task_id"]);
-        Html::popFooter();
-    }
+$itemtype = $_GET['itemtype'] ?? null;
+$task_id = $_GET['task_id'] ?? null;
+if (!(new Plugin())->isActivated('actualtime') || !PluginActualtimeSourcetimer::canModify($itemtype, $task_id)) {
+    Html::displayRightError();
 }
+
+Html::popHeader(
+    __('Modify timers', 'actualtime'),
+    $_SERVER['PHP_SELF'],
+    false,
+    '',
+    '',
+    PluginActualtimeSourcetimer::getType()
+);
+$source = new PluginActualtimeSourcetimer();
+$source->modalForm($itemtype, (int)$task_id);
+Html::popFooter();

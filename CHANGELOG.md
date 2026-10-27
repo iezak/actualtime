@@ -1,5 +1,27 @@
 # Actualtime
 
+## [3.2.1-london.1] - 2026-10-27
+
+### Added
+
+- London stage 1: create completed manual timers from Modify timers, including
+  saved tasks without previous timers.
+- Validate dates, prevent same-task overlaps and duplicate submissions, retain
+  form values on invalid intervals, audit the operator and assigned technician,
+  and update task duration atomically when configured.
+- Portuguese UI translations and isolated regression tests.
+
+### Fixed
+
+- Require access to the task and parent item when opening or submitting the
+  timer editor, and restrict existing-timer edits to the posted task.
+- Balance the timer editor's forms and containers.
+
+### Scope
+
+- Based on upstream 3.2.0 for GLPI 10.0.x. Start-time editing, deletion and
+  concurrent timers remain separate subsequent stages.
+
 ## [3.2.0] - 2025/02/27
 ### Added
 - Actualtimes for Problem tasks, contributed by Gambware

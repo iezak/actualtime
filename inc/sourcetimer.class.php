@@ -94,44 +94,43 @@ class PluginActualtimeSourcetimer extends CommonDBTM
         /** @var \DBmysql $DB */
         global $DB;
 
-        switch ($itemtype) {
-            case 'TicketTask':
-            case 'ChangeTask':
-            case 'ProblemTask':
-                $task = new $itemtype();
-                if ($task->getFromDB($items_id)) {
-                    $parent = getItemForItemtype($task->getItilObjectItemType());
-                    if ($parent->getFromDB($task->fields[$parent->getForeignKeyField()])) {
-                        if ($parent->fields['status'] < CommonITILObject::SOLVED) {
-                            return true;
-                        }
-                    }
-                }
-                break;
-            case 'ProjectTask':
-                $task = new $itemtype();
-                if ($task->getFromDB($items_id)) {
-                    $finished_states_it = $DB->request(
-                        [
-                            'SELECT' => ['id'],
-                            'FROM'   => ProjectState::getTable(),
-                            'WHERE'  => [
-                                'is_finished' => 1
-                            ],
-                        ]
-                    );
-                    $finished_states_ids = [];
-                    foreach ($finished_states_it as $finished_state) {
-                        $finished_states_ids[] = $finished_state['id'];
-                    }
-                    if (!in_array($task->getField('projectstates_id'), $finished_states_ids)) {
-                        return true;
-                    }
-                }
-                break;
+        if (
+            !Session::getLoginUserID()
+            || !is_string($itemtype)
+            || filter_var($items_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            || !self::checkItemtypeRight($itemtype)
+        ) {
+            return false;
         }
 
-        return false;
+        $task = new $itemtype();
+        if (!$task->can((int)$items_id, READ) || !empty($task->fields['is_deleted'])) {
+            return false;
+        }
+
+        $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
+        $parent = getItemForItemtype($parent_type);
+        if (
+            !$parent
+            || !$parent->can((int)$task->fields[$parent->getForeignKeyField()], READ)
+            || !empty($parent->fields['is_deleted'])
+        ) {
+            return false;
+        }
+
+        if ($itemtype !== ProjectTask::class) {
+            return (int)$parent->fields['status'] < CommonITILObject::SOLVED;
+        }
+        foreach ($DB->request([
+            'SELECT' => ['id'],
+            'FROM' => ProjectState::getTable(),
+            'WHERE' => ['is_finished' => 1],
+        ]) as $state) {
+            if ((int)$task->getField('projectstates_id') === (int)$state['id']) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -151,18 +150,6 @@ class PluginActualtimeSourcetimer extends CommonDBTM
         if (!self::checkItemtypeRight($itemtype)) {
             return;
         }
-        $count = countElementsInTable(
-            PluginActualtimeTask::getTable(),
-            [
-                'items_id'  => $item->getID(),
-                'itemtype'  => $itemtype,
-                'NOT'       => ['actual_end' => null]
-            ]
-        );
-        if ($count == 0) {
-            return;
-        }
-
         if (!self::canModify($itemtype, $item->getID())) {
             return;
         }
@@ -203,10 +190,39 @@ JAVASCRIPT;
         /** @var \DBmysql $DB */
         global $DB;
 
-        echo "<form name='form' id='form' method='post' action='" . $this->getFormURL();
-        echo "' enctype='multipart/form-data'>";
+        $task = PluginActualtimeManualtimer::getEditableTask($itemtype, $items_id);
+        $items_id = (int)$items_id;
+        $saved = $_SESSION['plugin_actualtime_manualtimer'][$itemtype][$items_id] ?? [];
+        unset($_SESSION['plugin_actualtime_manualtimer'][$itemtype][$items_id]);
+
+        echo "<div class='card-body'>";
+        echo "<h3>" . __('Add a manual timer', 'actualtime') . "</h3>";
+        echo "<p class='text-muted'>" . __('Enter the start and end of the period worked.', 'actualtime') . "</p>";
+        echo "<form method='post' action='" . Plugin::getWebDir('actualtime') . "/front/manualtimer.form.php' data-submit-once>";
         echo Html::hidden('itemtype', ['value' => $itemtype]);
         echo Html::hidden('items_id', ['value' => $items_id]);
+        echo "<div class='mb-3'><label class='form-label'>" . __('Start date') . "</label>";
+        Html::showDateTimeField('manual_begin', [
+            'value' => $saved['manual_begin'] ?? '',
+            'required' => true,
+            'maybeempty' => false,
+            'timestep' => 1,
+            'maxdate' => date('Y-m-d H:i:s'),
+        ]);
+        echo "</div><div class='mb-3'><label class='form-label'>" . __('End date') . "</label>";
+        Html::showDateTimeField('manual_end', [
+            'value' => $saved['manual_end'] ?? '',
+            'required' => true,
+            'maybeempty' => false,
+            'timestep' => 1,
+            'maxdate' => date('Y-m-d H:i:s'),
+        ]);
+        echo "</div><p>" . __('Technician') . ": ";
+        echo htmlescape(getUserName(PluginActualtimeManualtimer::getTechnician($task))) . "</p>";
+        echo "<button class='btn btn-primary' type='submit' name='add_manual' value='1'>";
+        echo "<i class='fas fa-plus me-1'></i>" . __('Add a manual timer', 'actualtime') . "</button>";
+        Html::closeForm();
+        echo "</div>";
 
         $query = [
             'FROM' => PluginActualtimeTask::getTable(),
@@ -215,19 +231,28 @@ JAVASCRIPT;
                 'itemtype' => $itemtype,
                 'NOT' => ['actual_end' => null],
             ],
+            'ORDER' => ['actual_begin ASC', 'id ASC'],
         ];
 
-        foreach ($DB->request($query) as $data) {
-            echo "<div id='mainformtable'>";
+        $timers = $DB->request($query);
+        if (count($timers) === 0) {
+            return;
+        }
+
+        echo "<div class='card-body border-top'>";
+        echo "<h3>" . __('Existing timers', 'actualtime') . "</h3>";
+        echo "<form name='form' id='form' method='post' action='" . $this->getFormURL() . "' data-submit-once>";
+        echo Html::hidden('itemtype', ['value' => $itemtype]);
+        echo Html::hidden('items_id', ['value' => $items_id]);
+        foreach ($timers as $data) {
             echo "<div class='card-body row'>";
 
             echo "<div class='form-field row col-12 mb-2'>";
             echo "<label class='col-form-label col-2 text-xxl-end'>" . __('Start date') . "</label>";
-            echo "<label class='col-form-label col-2'>" . $data['actual_begin'] . "</label>";
+            echo "<label class='col-form-label col-2'>" . htmlescape($data['actual_begin']) . "</label>";
             echo "<label class='col-form-label col-2 text-xxl-end'>" . __('End date') . "</label>";
             echo "<div class='col-6  field-container'>";
             Html::showDateTimeField('actual_end[' . $data['id'] . ']', ['value' => $data['actual_end']]);
-            echo "</div>";
             echo "</div>";
 
             echo "</div>";
@@ -240,11 +265,8 @@ JAVASCRIPT;
         echo "<span>" . _x('button', 'Save') . "</span>";
         echo "</button>";
         echo "</div>";
-        echo Html::hidden('_glpi_csrf_token', ['value' => Session::getNewCSRFToken()]);
-        echo "</div>";
-        echo "</form>";
-
         Html::closeForm();
+        echo "</div>";
     }
 
     /**
