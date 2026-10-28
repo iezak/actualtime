@@ -33,6 +33,10 @@ $USEDBREPLICATE = 1;
 $DBCONNECTION_REQUIRED = 0;
 
 include("../../../../inc/includes.php");
+Session::checkLoginUser();
+if (!(new Plugin())->isActivated('actualtime')) {
+    Html::displayRightError();
+}
 
 $report = new PluginReportsAutoReport(__('ActualTimeUser'));
 //Filtro fecha
@@ -49,7 +53,7 @@ $choices = [
 $filter_active = new PluginReportsArrayCriteria(
     $report,
     'glpi_tickets_users.type',
-    _('Group by'),
+    __('Group by'),
     $choices
 );
 
@@ -83,30 +87,12 @@ $report->setColumns([
         __("Duration Diff", "actiontime") . " (%)"
     )
 ]);
-if ($filter_active->getParameterValue() == 1) {
-    $query = "SELECT glpi_tickets_users.users_id as user_id,";
-    $group = "
-AND glpi_tickets_users.type=1
-GROUP BY glpi_tickets_users.users_id";
-} else {
-    $query = "SELECT glpi_tickettasks.users_id_tech as user_id,";
-    $group = "
-GROUP BY glpi_tickettasks.users_id_tech";
-}
+$by_requester = (int)$filter_active->getParameterValue() === 1;
 $report->delCriteria('glpi_tickets_users.type');
-$query .= "
-    sum(glpi_tickettasks.actiontime) AS duration,
-    sum(actual_actiontime) AS totalduration,
-    (sum(glpi_tickettasks.actiontime) - sum(actual_actiontime)) AS diff,
-    concat(round(((sum(glpi_tickettasks.actiontime) - sum(actual_actiontime)) / sum(actual_actiontime) * 100 ),2),'%') AS diffpercent
-FROM glpi_plugin_actualtime_tasks
-    RIGHT JOIN glpi_tickettasks ON glpi_tickettasks.id = glpi_plugin_actualtime_tasks.tasks_id
-    INNER JOIN glpi_tickets ON glpi_tickets.id = glpi_tickettasks.tickets_id
-    INNER JOIN glpi_tickets_users ON glpi_tickets_users.tickets_id = glpi_tickets.id
-WHERE status = 6
-";
-$query .= $report->addSqlCriteriasRestriction();
-$query .= $group;
-
+$query = PluginActualtimeStatistics::userReportSql(
+    $by_requester,
+    getEntitiesRestrictRequest('AND', 'glpi_tickets'),
+    $report->addSqlCriteriasRestriction()
+);
 $report->setSqlRequest($query);
 $report->execute();

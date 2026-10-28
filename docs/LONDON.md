@@ -1,10 +1,38 @@
-# ActualTime London — etapa 4
+# ActualTime London — revisão final
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.4-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.5-london.1**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
 ## Entrega atual
+
+As quatro funções foram homologadas nas etapas anteriores. Esta revisão corrige
+diferenças encontradas nas estatísticas e nos relatórios opcionais do Reports.
+
+Nas estatísticas de chamado/problema/mudança, o total real geral e a soma por
+técnico incluem os mesmos segundos de cronômetros ativos, no instante em que a
+tela é aberta ou recarregada. O tempo real fica com o técnico registrado no
+apontamento, inclusive depois da troca do responsável da tarefa. A duração da
+tarefa continua vinculada ao responsável atual, pois o GLPI mantém um único
+valor de duração por tarefa. A tabela mostra essa distinção.
+
+Os relatórios **ActualTimeTotal** e **ActualTimeUser**, quando o plugin Reports
+estiver em uso, passam a consultar a estrutura atual de apontamentos. Vários
+períodos da mesma tarefa e vários solicitantes não multiplicam sua duração.
+O relatório por técnico preserva quem realizou cada período. O modo por
+solicitante considera cada chamado uma vez para cada solicitante distinto.
+
+Esses relatórios mantêm o filtro pela **data de fechamento** e consideram
+chamados fechados, não excluídos e pertencentes às entidades ativas. A permissão
+própria do relatório no Reports continua necessária. Tarefas sem apontamentos
+têm tempo real zero. A diferença percentual segue as estatísticas:
+**100 × (duração da tarefa − tempo real) / duração da tarefa**; com duração zero,
+o percentual exibido é zero.
+
+Nomes de técnicos com aspas e outros caracteres são escapados sem interromper
+a montagem da tela. A revisão não altera o esquema do banco.
+
+## Funções homologadas
 
 O mesmo técnico pode iniciar cronômetros em **tarefas diferentes ao mesmo
 tempo**, no mesmo chamado ou em chamados/problemas/mudanças/projetos distintos.
@@ -122,10 +150,10 @@ tempo já transcorrido do cronômetro ativo, quando houver um.
    ativos antes de substituir os arquivos.
 3. Após mesclar a PR desta etapa em **london/glpi10**, atualize essa branch pelo
    LondonPluginManager. Para testar antes da mesclagem, selecione a branch
-   **london/etapa-4-tarefas-simultaneas**. Use a mesma pasta **actualtime**.
+   **london/etapa-5-revisao-estatisticas**. Use a mesma pasta **actualtime**.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI, confirme **3.2.4-london.1** e use **Ctrl+F5** para
+5. Limpe o cache do GLPI, confirme **3.2.5-london.1** e use **Ctrl+F5** para
    carregar o JavaScript atualizado.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
@@ -141,6 +169,14 @@ Use um dia passado e um chamado aberto com uma tarefa salva:
 
 | Teste | Resultado esperado |
 |---|---|
+| Com dois cronômetros ativos, abrir/recarregar estatísticas do chamado | Soma da coluna ActualTime por técnico igual ao total ActualTime do chamado |
+| Trocar responsável de tarefa com períodos já gravados | Tempo antigo continua com o técnico do apontamento |
+| Nome de técnico com aspas | Estatísticas carregam normalmente e mostram o nome como texto |
+| Reports: chamado fechado com dois períodos na mesma tarefa | Duração da tarefa contada uma vez; tempo real soma os períodos |
+| Reports: chamado com dois solicitantes | Uma linha por chamado no total; uma contribuição por solicitante no modo correspondente |
+| Reports: selecionar entidade e período de fechamento | Apenas os chamados dessa seleção aparecem |
+| Reports: tarefa sem apontamentos e duração zero | Tempo real zero, sem erro de divisão |
+| Criar, editar e excluir período passado enquanto outra tarefa conta | Total corrigido e histórico preservado; outro cronômetro continua |
 | Iniciar tarefa A e depois tarefa B, com o mesmo técnico | Ambas ativas; dois contadores e dois itens no aviso |
 | Pausar A, aguardar e conferir B | A permanece parada; B continua contando |
 | Retomar A | Abre novo período em A; B continua sem alteração |
@@ -191,9 +227,9 @@ espelho: os testes automatizados isolados não substituem essa homologação.
 1. **Concluída:** criar apontamento manual encerrado.
 2. **Concluída:** alterar início e término, incluindo início de apontamento ativo.
 3. **Concluída:** excluir um apontamento com confirmação e auditoria.
-4. **Atual:** liberar tarefas simultâneas para o mesmo usuário.
-5. **Incluída nesta entrega:** contadores, lembretes e controles independentes.
-6. Revisar totais, permissões e integrações no conjunto.
+4. **Concluída:** liberar tarefas simultâneas para o mesmo usuário.
+5. **Concluída na etapa 4:** contadores, lembretes e controles independentes.
+6. **Atual:** revisão de totais, permissões e integrações no conjunto.
 
 ## Verificação automatizada
 
@@ -203,6 +239,8 @@ Executar na raiz do plugin com PHP 8.1 ou posterior:
     php tests/regression/edit-timers.php
     php tests/regression/delete-timers.php
     php tests/regression/concurrent-timers.php
+    php tests/regression/statistics.php
+    python tests/regression/reports.sql.py
 
 Para testar com a classe Html real do GLPI 10.0.26, informe a raiz de uma cópia
 desse código. O teste importa somente src/Html.php; não inicia o GLPI nem acessa
@@ -212,6 +250,7 @@ o banco real:
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/edit-timers.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/delete-timers.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/concurrent-timers.php
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/statistics.php
 
 Com Playwright/Chromium, jQuery 3.6.0 e Flatpickr 4.6.13 disponíveis, o teste de
 navegador usa a classe Html e os helpers JavaScript do GLPI 10.0.26. Abre o
@@ -222,11 +261,16 @@ exclusão, inclusive com campos de edição inválidos que ainda não foram salv
 
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/calendar.browser.cjs
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/concurrent.browser.cjs
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/statistics.browser.cjs
 
 A cópia do GLPI deve conter src/Html.php, js/common.js e
 js/flatpickr_buttons_plugin.js. O PHP usado no teste precisa da extensão intl.
 O teste de simultaneidade usa os métodos PHP e o JavaScript reais do plugin,
 duas abas e um adaptador para o ciclo de abertura/fechamento do Bootstrap.
+O teste SQL executa as consultas geradas pelo PHP em um banco SQLite em memória,
+com vários períodos, solicitantes, técnicos e entidades. Valida os cálculos
+relacionais; a execução completa no Reports/MySQL continua na homologação.
+PHP_BINARY pode indicar o executável PHP nos testes Python e de navegador.
 
 Os testes executam o código do plugin com adaptadores em memória para os serviços
 do GLPI. Cobrem datas, autorização, persistência, arredondamento, duplicatas,

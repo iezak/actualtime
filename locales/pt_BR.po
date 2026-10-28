@@ -20,6 +20,9 @@ msgstr "Informe o início e o término do período trabalhado."
 msgid "Existing timers"
 msgstr "Apontamentos existentes"
 
+msgid "Actual time follows the recorded technician; task duration follows the current assignee."
+msgstr "O tempo real segue o técnico do apontamento; a duração da tarefa segue o responsável atual."
+
 msgid "You do not have permission to control this timer."
 msgstr "Você não tem permissão para controlar este cronômetro."
 

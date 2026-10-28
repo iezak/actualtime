@@ -1,8 +1,8 @@
 # ActualTime
 
-> **Fork London — GLPI 10 / base 3.2.0.** A etapa 4 permite executar tarefas
-> simultâneas com contadores e controles independentes. Inclui criação manual,
-> edição de horários e exclusão com confirmação e histórico.
+> **Fork London — GLPI 10 / base 3.2.0.** Inclui tarefas simultâneas, criação
+> manual, edição e exclusão de apontamentos. A revisão final alinha os totais por
+> técnico e corrige os relatórios opcionais do Reports.
 > Veja o [guia de atualização e testes](docs/LONDON.md).
 
 <img src="https://raw.githubusercontent.com/ticgal/actualtime/multimedia/actualtime.png" alt="ActualTime Logo" height="250px" width="250px" class="js-lazy-loaded">
