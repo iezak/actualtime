@@ -799,22 +799,8 @@ JAVASCRIPT;
             || $config->showInHelpdesk()
         ) {
             $total_time = $parent->getField('actiontime');
-            $itemtype = $parent->getTaskClass();
-            $tasktable = $itemtype::getTable();
-            $parent_id = $parent->getID();
-            $actual_totaltime = 0;
-            $query = [
-            'SELECT' => [
-                $tasktable . '.id',
-            ],
-            'FROM' => $tasktable,
-            'WHERE' => [
-                $parent->getForeignKeyField() => $parent_id,
-            ]
-            ];
-            foreach ($DB->request($query) as $id => $row) {
-                $actual_totaltime += self::totalEndTime($row['id'], $itemtype);
-            }
+            $statistics = PluginActualtimeStatistics::parentTotals($parent);
+            $actual_totaltime = $statistics['actual_total'];
             $html = "<table class='tab_cadre_fixe'>";
             $html .= "<tr><th colspan='2'>ActualTime</th></tr>";
 
@@ -841,52 +827,9 @@ JAVASCRIPT;
             $html .= "<tr><th colspan='5'>ActualTime - " . __("Technician") . "</th></tr>";
             $html .= "<tr><th>" . __("Technician") . "</th><th>" . __("Total duration") . "</th><th>ActualTime - " . __("Total duration") . "</th><th>" . __("Duration Diff", "actiontime") . "</th><th>" . __("Duration Diff", "actiontime") . " (%)</th></tr>";
 
-            $query = [
-            'SELECT' => [
-                'actiontime',
-                'id',
-                'users_id_tech',
-            ],
-            'FROM' => $tasktable,
-            'WHERE' => [
-                $parent->getForeignKeyField() => $parent_id,
-            ],
-            'ORDER' => 'users_id_tech',
-            ];
-            $list = [];
-            foreach ($DB->request($query) as $id => $row) {
-                $list[$row['users_id_tech']]['name'] = getUserName($row['users_id_tech']);
-                if (isset($list[$row['users_id_tech']]['total'])) {
-                    $list[$row['users_id_tech']]['total'] += $row['actiontime'];
-                } else {
-                    $list[$row['users_id_tech']]['total'] = $row['actiontime'];
-                }
-                $qtime = [
-                    'SELECT' => [
-                        'SUM' => 'actual_actiontime AS actual_total'
-                    ],
-                    'FROM' => self::getTable(),
-                    'WHERE' => [
-                        'items_id' => $row['id'],
-                        'itemtype' => $itemtype,
-                    ],
-                ];
-                $req = $DB->request($qtime);
-                if ($time = $req->current()) {
-                    $actualtotal = $time['actual_total'];
-                } else {
-                    $actualtotal = 0;
-                }
-
-                if (isset($list[$row['users_id_tech']]['actual_total'])) {
-                    $list[$row['users_id_tech']]['actual_total'] += $actualtotal;
-                } else {
-                    $list[$row['users_id_tech']]['actual_total'] = $actualtotal;
-                }
-            }
-
+            $list = $statistics['technicians'];
             foreach ($list as $key => $value) {
-                $html .= "<tr class='tab_bg_2'><td>" . $value['name'] . "</td>";
+                $html .= "<tr class='tab_bg_2'><td>" . htmlspecialchars((string)($key > 0 ? getUserName($key) : __('None')), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</td>";
 
                 $html .= "<td>" . Html::timestampToString($value['total']) . "</td>";
 
@@ -900,14 +843,16 @@ JAVASCRIPT;
                 if ($value['total'] == 0) {
                     $html .= "<td style='color:" . $color . "'>0%</td></tr>";
                 } else {
-                    $html .= "<td style='color:" . $color . "'>" . round(100 * ($value['total'] - $value['actual_total']) / $value['total']) . "%</td></tr>";
+                    $html .= "<td style='color:" . $color . "'>" . round(100 * ($value['total'] - $value['actual_total']) / $value['total'], 2) . "%</td></tr>";
                 }
             }
             $html .= "</table>";
 
+            $html .= "<p class='text-muted'>" . __('Actual time follows the recorded technician; task duration follows the current assignee.', 'actualtime') . "</p>";
+            $encoded_html = json_encode($html, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
             $script = <<<JAVASCRIPT
 $(document).ready(function(){
-    $("div.dates_timelines:last").append("{$html}");
+    $("div.dates_timelines:last").append({$encoded_html});
 });
 JAVASCRIPT;
             echo Html::scriptBlock($script);

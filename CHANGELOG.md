@@ -1,5 +1,22 @@
 # Actualtime
 
+## [3.2.5-london.1] - 2026-10-28
+
+### Fixed
+
+- Include the same running elapsed time in parent and technician statistics.
+  Attribute actual time to the technician saved on each period; task duration
+  remains attributed to the current task assignee.
+- Safely escape technician names and JSON-encode the statistics HTML embedded
+  in JavaScript, including names containing quotes or markup.
+- Repair the optional Reports integration for the items_id/itemtype schema,
+  replacing the removed tasks_id reference.
+- Aggregate timer periods before joining tasks and deduplicate requesters so
+  task duration is counted once. Keep tasks without periods and zero totals.
+- Apply active-entity scope to both reports, preserve close-date filters and
+  native Reports permissions, and align percentage differences with task duration.
+- Add combined-workflow, statistics-rendering and relational report regressions.
+
 ## [3.2.4-london.1] - 2026-10-27
 
 ### Added

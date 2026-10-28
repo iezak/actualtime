@@ -117,7 +117,10 @@ class CommonDBTM
         return true;
     }
 }
-class CommonITILObject extends CommonDBTM { public const SOLVED = 5; }
+class CommonITILObject extends CommonDBTM {
+    public const SOLVED = 5;
+    public static function getTaskClass() { return static::class . 'Task'; }
+}
 class Ticket extends CommonITILObject {}
 class Change extends CommonITILObject {}
 class Problem extends CommonITILObject {}
@@ -244,7 +247,13 @@ class MemoryDB
     }
     public function request($query) {
         $rows = $query['FROM'] === ProjectState::getTable() ? [['id' => 9, 'is_finished' => 1]]
-            : ($query['FROM'] === PluginActualtimeSourcetimer::getTable() ? $this->sources : $this->timers);
+            : ($query['FROM'] === PluginActualtimeSourcetimer::getTable() ? $this->sources
+                : ($query['FROM'] === PluginActualtimeTask::getTable() ? $this->timers : []));
+        if ($rows === [] && !in_array($query['FROM'], [PluginActualtimeTask::getTable(), PluginActualtimeSourcetimer::getTable()], true)) {
+            foreach (CommonDBTM::$records as $type => $records) {
+                if ($type::getTable() === $query['FROM']) { $rows = array_values($records); break; }
+            }
+        }
         $rows = array_values(array_filter($rows, fn($row) => $this->matches($row, $query['WHERE'] ?? [])));
         if (isset($query['LIMIT'])) { $rows = array_slice($rows, 0, $query['LIMIT']); }
         return new ArrayIterator($rows);
