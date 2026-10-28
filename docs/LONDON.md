@@ -1,10 +1,45 @@
-# ActualTime London — etapa 3
+# ActualTime London — etapa 4
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.3-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.4-london.1**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
 ## Entrega atual
+
+O mesmo técnico pode iniciar cronômetros em **tarefas diferentes ao mesmo
+tempo**, no mesmo chamado ou em chamados/problemas/mudanças/projetos distintos.
+Cada tarefa acumula seu próprio tempo integralmente: duas ativas por 10 minutos
+registram 10 minutos em cada uma. O total dos apontamentos pode, portanto,
+superar o tempo corrido. Não há divisão automática entre tarefas.
+
+Iniciar, pausar, retomar ou encerrar atua somente na tarefa escolhida. A mesma
+tarefa continua aceitando apenas um cronômetro ativo, inclusive quando o início
+é solicitado em duas abas. Tarefas de tipos diferentes com o mesmo número de ID
+têm controles e contadores separados.
+
+O aviso **Tarefas em execução** lista todos os cronômetros do usuário que o
+perfil atual pode consultar. Cada link abre a tarefa correspondente. Recarregar
+a página recupera os tempos do servidor. Mudanças entre abas são sinalizadas
+no navegador; uma consulta a cada 10 segundos, enquanto a página está visível,
+também atualiza os cronômetros. Respostas anteriores a uma ação não reativam
+contadores já pausados. Desativar o aviso mantém os contadores das tarefas.
+
+Os controles exigem permissão de atualização da tarefa, acesso ao item pai e
+a atribuição ou autorização do técnico. A permissão **Modify timers** continua
+separada: ela é usada para criar, editar ou excluir apontamentos. Permanecem as
+restrições de planejamento, estados e integrações já existentes no início.
+
+Em chamados, problemas e mudanças, encerrar mantém a conclusão da tarefa
+correspondente. Em projetos, encerrar o cronômetro mantém o estado de projeto
+configurado e atualiza a duração efetiva; não escolhe um estado final arbitrário.
+
+O código atual do repositório **iezak/autostatus**, revisado nesta etapa
+(commit 06a4e6f), usa eventos de criação de chamados, tarefas e acompanhamentos.
+Não contém um gancho direto para iniciar/pausar/encerrar ActualTime. Não foi
+necessária alteração nesse repositório. Regras de status e outras integrações
+instaladas no servidor devem ser conferidas na homologação.
+
+## Funcionalidades já validadas
 
 Em **Modify timers > Apontamentos existentes**, cada período encerrado tem o
 botão **Excluir apontamento**. Ele abre uma confirmação com os horários salvos,
@@ -87,10 +122,11 @@ tempo já transcorrido do cronômetro ativo, quando houver um.
    ativos antes de substituir os arquivos.
 3. Após mesclar a PR desta etapa em **london/glpi10**, atualize essa branch pelo
    LondonPluginManager. Para testar antes da mesclagem, selecione a branch
-   **london/etapa-3-excluir-apontamentos**. Use a mesma pasta **actualtime**.
+   **london/etapa-4-tarefas-simultaneas**. Use a mesma pasta **actualtime**.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI e confirme a versão **3.2.3-london.1**.
+5. Limpe o cache do GLPI, confirme **3.2.4-london.1** e use **Ctrl+F5** para
+   carregar o JavaScript atualizado.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
 
@@ -105,6 +141,18 @@ Use um dia passado e um chamado aberto com uma tarefa salva:
 
 | Teste | Resultado esperado |
 |---|---|
+| Iniciar tarefa A e depois tarefa B, com o mesmo técnico | Ambas ativas; dois contadores e dois itens no aviso |
+| Pausar A, aguardar e conferir B | A permanece parada; B continua contando |
+| Retomar A | Abre novo período em A; B continua sem alteração |
+| Encerrar A | Somente A termina; B continua ativa e sua tarefa permanece aberta |
+| Recarregar ou acessar outra página do GLPI | B continua ativa e o aviso abre a tarefa correta |
+| Pausar B em outra aba | A primeira aba atualiza o contador e os controles de B |
+| Iniciar a mesma tarefa em duas abas | Um único cronômetro ativo para ela |
+| Desativar somente o aviso de cronômetro nas configurações | Contadores nas tarefas continuam funcionando |
+| Tarefas de tipos diferentes com IDs iguais | Tempos, botões e janelas associados ao tipo correto |
+| Técnico sem atualização da tarefa ou sem acesso ao item pai | Controle bloqueado, inclusive por requisição direta |
+| Gestor trocar o técnico da tarefa A enquanto A e B estão ativas | Período antigo de A pausado; B continua; técnico anterior perde o controle de A |
+| Conferir regras de status ao encerrar uma entre várias tarefas | Comportamento esperado das regras instaladas, sem concluir as outras tarefas |
 | Criar períodos isolados de 08:00–08:30 e 08:30–08:45 | Total real de 45 min |
 | Clicar em excluir no primeiro período e cancelar | Dois registros e total de 45 min permanecem |
 | Repetir e confirmar a exclusão do primeiro período | Restam 15 min; segundo registro e estado da tarefa preservados |
@@ -142,9 +190,9 @@ espelho: os testes automatizados isolados não substituem essa homologação.
 
 1. **Concluída:** criar apontamento manual encerrado.
 2. **Concluída:** alterar início e término, incluindo início de apontamento ativo.
-3. **Atual:** excluir um apontamento com confirmação e auditoria.
-4. Liberar tarefas simultâneas para o mesmo usuário.
-5. Adaptar contadores, lembretes e controles independentes.
+3. **Concluída:** excluir um apontamento com confirmação e auditoria.
+4. **Atual:** liberar tarefas simultâneas para o mesmo usuário.
+5. **Incluída nesta entrega:** contadores, lembretes e controles independentes.
 6. Revisar totais, permissões e integrações no conjunto.
 
 ## Verificação automatizada
@@ -154,6 +202,7 @@ Executar na raiz do plugin com PHP 8.1 ou posterior:
     php tests/regression/manualtimer.php
     php tests/regression/edit-timers.php
     php tests/regression/delete-timers.php
+    php tests/regression/concurrent-timers.php
 
 Para testar com a classe Html real do GLPI 10.0.26, informe a raiz de uma cópia
 desse código. O teste importa somente src/Html.php; não inicia o GLPI nem acessa
@@ -162,6 +211,7 @@ o banco real:
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/manualtimer.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/edit-timers.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/delete-timers.php
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/concurrent-timers.php
 
 Com Playwright/Chromium, jQuery 3.6.0 e Flatpickr 4.6.13 disponíveis, o teste de
 navegador usa a classe Html e os helpers JavaScript do GLPI 10.0.26. Abre o
@@ -171,13 +221,16 @@ exercita o controle de envio único do GLPI, a confirmação, o cancelamento e a
 exclusão, inclusive com campos de edição inválidos que ainda não foram salvos:
 
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/calendar.browser.cjs
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 node tests/regression/concurrent.browser.cjs
 
 A cópia do GLPI deve conter src/Html.php, js/common.js e
 js/flatpickr_buttons_plugin.js. O PHP usado no teste precisa da extensão intl.
+O teste de simultaneidade usa os métodos PHP e o JavaScript reais do plugin,
+duas abas e um adaptador para o ciclo de abertura/fechamento do Bootstrap.
 
 Os testes executam o código do plugin com adaptadores em memória para os serviços
 do GLPI. Cobrem datas, autorização, persistência, arredondamento, duplicatas,
-edição ativa, exclusão confirmada, conflitos entre abas, controles nativos,
+edição ativa, exclusão confirmada, tarefas simultâneas, conflitos entre abas, controles nativos,
 rollback e formulário.
 O ambiente real com GLPI/MySQL, concorrência entre
 requisições e interação visual precisam ser validados no espelho.

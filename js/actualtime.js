@@ -1,41 +1,145 @@
-/* global CFG_GLPI */
+/* global CFG_GLPI, GLPI_PLUGINS_PATH, bootstrap */
+/* SPDX-License-Identifier: AGPL-3.0-or-later */
 window.actualTime = new function() {
-   this.ajax_url = CFG_GLPI.root_doc + '/plugins/actualtime/ajax/timer.php';
-   var timer;
-   var popup_div = '';
-// Translations
-   var symb_d = '%dd';
-   var symb_day = '%d day';
-   var symb_days = '%d days';
-   var symb_h = '%dh';
-   var symb_hour = '%d hour';
-   var symb_hours = '%d hours';
-   var symb_min = '%dmin';
-   var symb_minute = '%d minute';
-   var symb_minutes = '%d minutes';
-   var symb_s = '%ds';
-   var symb_second = '%d second';
-   var symb_seconds = '%d seconds';
-   var text_pause = 'Pause';
-   var text_restart = 'Restart';
-   var text_done = 'Done';
-   var toast = null;
-   var modal = null;
+   const self = this;
+   const counters = new Map();
+   const states = new Map();
+   const pending = new Set();
+   const discovered = new WeakSet();
+   const newTargets = new Set();
+   let active = [];
+   let popupEnabled = false;
+   let toast = null;
+   let modal = null;
+   let modalRequest = 0;
+   let messageId = 0;
+   let generation = 0;
+   let syncing = false;
+   let syncQueued = false;
+   let initialized = false;
+   let popupKeys = '';
+   let popupDismissed = false;
+   const labels = {
+      symb_d: '%dd', symb_day: '%d day', symb_days: '%d days',
+      symb_h: '%dh', symb_hour: '%d hour', symb_hours: '%d hours',
+      symb_min: '%dmin', symb_minute: '%d minute', symb_minutes: '%d minutes',
+      symb_s: '%ds', symb_second: '%d second', symb_seconds: '%d seconds',
+      text_pause: 'Pause', text_start: 'Start', text_restart: 'Resume', text_stop: 'Stop', text_done: 'Done',
+      text_running: 'Running tasks (%d)', text_task: 'Task #%d',
+      text_error: 'Could not update the timer. Refresh the task and try again.'
+   };
 
-   this.showTaskForm = function(e) {
-      e.preventDefault();
-      if (modal == null) {
-         var html = `<div class="modal fade" id="modal_actualtime" role="dialog">';
-            <div class="modal-dialog modal-lg">
-               <div id="modal_content" class="modal-content">
-               </div>
-            </div>
-         </div>`;
-         $('body').append(html);
-         modal = new bootstrap.Modal(document.getElementById('modal_actualtime'),{});
+   function key(task, type) {
+      return /^(TicketTask|ChangeTask|ProblemTask|ProjectTask)$/.test(type)
+         && Number.isSafeInteger(Number(task)) && Number(task) > 0 ? type + ':' + Number(task) : '';
+   }
+   function elements(task, type, role) {
+      if (!key(task, type)) return $();
+      return $("[id^='actualtime_" + role + "_" + type + "_" + Number(task) + "_']");
+   }
+   function elapsed(entry) {
+      return entry.time + Math.max(0, Math.floor((Date.now() - entry.at) / 1000));
+   }
+   function draw(task, type, time) {
+      const value = self.timeToText(Math.max(0, Math.floor(Number(time) || 0)), 1);
+      elements(task, type, 'timer').text(value);
+      $("[data-actualtime-popup-time='" + key(task, type) + "']").text(value);
+   }
+   function tick() {
+      counters.forEach((entry) => draw(entry.task, entry.type, elapsed(entry)));
+   }
+   function taskForms(task, type) {
+      return $('form').filter(function() {
+         const form = $(this);
+         if (!form.find("input[name='id']").filter(function() { return Number(this.value) === Number(task); }).length) return false;
+         const action = (form.attr('action') || '').split('?')[0].toLowerCase();
+         return action.endsWith('/' + type.toLowerCase() + '.form.php')
+            || form.closest("div[data-itemtype='" + type + "'][data-items-id='" + task + "']").length
+            || form.closest('#actualtime_modal_content').attr('data-actualtime-task') === key(task, type);
+      });
+   }
+   function trackedValue(fields, value) {
+      fields.each(function() {
+         const field = $(this);
+         const previous = field.attr('data-track-changes');
+         field.attr('data-track-changes', '').val(value).trigger('change');
+         if (previous === undefined) field.removeAttr('data-track-changes');
+         else field.attr('data-track-changes', previous);
+      });
+   }
+   function updateCompletedForm(task, type, result) {
+      const forms = taskForms(task, type);
+      if (type !== 'ProjectTask') trackedValue(forms.find("select[name='state']"), 2);
+      if (result.task_time !== undefined && result.task_time !== null) {
+         trackedValue(forms.find("select[name='actiontime'], input[name='actiontime'], select[name='effective_duration'], input[name='effective_duration']"), result.task_time);
       }
-      $("#modal_content").load(this.ajax_url + '?showform=true');
-      modal.show();
+      const scope = $("div[data-itemtype='" + type + "'][data-items-id='" + task + "']");
+      scope.find('span.state.state_1').attr('title', labels.text_done).removeClass('state_1').addClass('state_2');
+      if (result.task_time !== undefined && result.task_time !== null) scope.find('span.actiontime').text(self.timeToText(Number(result.task_time), 1));
+   }
+   function applyState(state, force) {
+      const id = key(state.task_id, state.itemtype);
+      if (!id || (!force && pending.has(id))) return;
+      states.set(id, state);
+      if (state.active) self.startCount(state.task_id, state.itemtype, state.time);
+      else {
+         self.endCount(state.task_id, state.itemtype);
+         draw(state.task_id, state.itemtype, state.time);
+      }
+      elements(state.task_id, state.itemtype, 'timer').css('color', state.active ? 'red' : 'black');
+      elements(state.task_id, state.itemtype, 'faclock').css('color', state.active ? 'red' : 'black');
+      const toggle = elements(state.task_id, state.itemtype, 'button').filter("[id^='actualtime_button_" + state.itemtype + "_" + Number(state.task_id) + "_1_']");
+      const stop = elements(state.task_id, state.itemtype, 'button').filter("[id^='actualtime_button_" + state.itemtype + "_" + Number(state.task_id) + "_2_']");
+      const allowed = Boolean(state.can_control);
+      const toggleEnabled = allowed && !state.done && (state.active || state.can_start);
+      const resume = Number(state.time) > 0;
+      toggle.attr('action', state.active ? 'pause' : 'start').prop('disabled', !toggleEnabled)
+         .attr('title', state.active ? labels.text_pause : (resume ? labels.text_restart : labels.text_start))
+         .css('background-color', toggleEnabled ? (state.active ? 'orange' : 'green') : 'gray')
+         .html("<span><i class='fa-solid " + (state.active ? 'fa-pause' : (resume ? 'fa-forward' : 'fa-play')) + "' aria-hidden='true'></i></span>");
+      const stopEnabled = allowed && !state.done && (state.active || Number(state.time) > 0);
+      stop.attr('action', 'end').prop('disabled', !stopEnabled).attr('title', labels.text_stop)
+         .css('background-color', stopEnabled ? 'red' : 'gray');
+   }
+   function renderPopup() {
+      if (!toast) return;
+      const nextKeys = active.map(state => key(state.task_id, state.itemtype)).join('|');
+      if (nextKeys !== popupKeys) popupDismissed = false;
+      popupKeys = nextKeys;
+      const body = $('#toast_body').empty();
+      if (!popupEnabled || !active.length || popupDismissed) {
+         toast.hide();
+         return;
+      }
+      $('<strong>').text(labels.text_running.replace('%d', active.length)).appendTo(body);
+      const list = $('<ul>', {class: 'list-unstyled mb-0 mt-2'}).css({maxHeight: '18rem', overflowY: 'auto'}).appendTo(body);
+      active.forEach(state => {
+         const id = key(state.task_id, state.itemtype);
+         if (!id) return;
+         const row = $('<li>', {class: 'mb-2'}).appendTo(list);
+         $('<a>', {href: state.link}).text(state.name + ' #' + state.parent_id + ' / ' + labels.text_task.replace('%d', state.task_id))
+            .on('click', function(e) {
+               if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+               self.showTaskForm(e, state.task_id, state.itemtype);
+            }).appendTo(row);
+         row.append(document.createTextNode(' → '));
+         $('<span>').attr('data-actualtime-popup-time', id).appendTo(row);
+         const counter = counters.get(id);
+         draw(state.task_id, state.itemtype, counter ? elapsed(counter) : state.time);
+      });
+      toast.show();
+   }
+   function notify(result) {
+      const warning = result.type === 'warning';
+      const title = warning ? __('Warning') : (result.type === 'info' ? _n('Information', 'Informations', 1) : __('Error'));
+      const container = $('<div>', {class: 'toast-container bottom-0 end-0 p-3 messages_after_redirect'}).appendTo('body');
+      const root = $('<div>', {id: 'actualtime_message_' + (++messageId), class: 'toast border-0', role: 'alert'}).appendTo(container);
+      const header = $('<div>', {class: 'toast-header text-white ' + (warning ? 'bg-warning' : 'bg-info')}).appendTo(root);
+      $('<strong>', {class: 'me-auto'}).text(title).appendTo(header);
+      $('<button>', {type: 'button', class: 'btn-close', 'data-bs-dismiss': 'toast', 'aria-label': __('Close')}).appendTo(header);
+      $('<div>', {class: 'toast-body'}).html(result.message || labels.text_error).appendTo(root);
+      root.on('hidden.bs.toast', () => container.remove());
+      new bootstrap.Toast(root[0], {delay: 10000}).show();
    }
 
    this.timeToText = function(time, format) {
@@ -45,195 +149,150 @@ window.actualTime = new function() {
       var distance = time;
       var seconds = distance % 60;
       distance -= seconds;
-      var text = (format == 3 ? (seconds > 1 ? symb_seconds : symb_second) : symb_s).replace('%d', seconds);
+      var text = (format == 3 ? (seconds > 1 ? labels.symb_seconds : labels.symb_second) : labels.symb_s).replace('%d', seconds);
       ;
       if (distance > 0) {
          minutes = (distance % 3600) / 60;
          distance -= minutes * 60;
-         text = (format == 3 ? (minutes > 1 ? symb_minutes : symb_minute) : symb_min).replace('%d', minutes) + ' ' + text;
+         text = (format == 3 ? (minutes > 1 ? labels.symb_minutes : labels.symb_minute) : labels.symb_min).replace('%d', minutes) + ' ' + text;
          if (distance > 0) {
             if (format == 2) {
                hours = distance / 3600;
                if (minutes < 10) {
                   minutes = '0' + minutes;
                }
-               return symb_h.replace('%d', hours) + (seconds > 0 ? symb_min.replace('%d', minutes) + symb_s.replace('%d', (seconds < 10 ? '0' : '') + seconds) : minutes);
+               return labels.symb_h.replace('%d', hours) + (seconds > 0 ? labels.symb_min.replace('%d', minutes) + labels.symb_s.replace('%d', (seconds < 10 ? '0' : '') + seconds) : minutes);
             }
             hours = (distance % 86400) / 3600;
             distance -= hours * 3600;
-            text = (format == 3 ? (hours > 1 ? symb_hours : symb_hour) : symb_h).replace('%d', hours) + ' ' + text;
+            text = (format == 3 ? (hours > 1 ? labels.symb_hours : labels.symb_hour) : labels.symb_h).replace('%d', hours) + ' ' + text;
             if (distance > 0) {
                days = distance / 86400;
-               text = (format == 3 ? (days > 1 ? symb_days : symb_day) : symb_d).replace('%d', days) + ' ' + text;
+               text = (format == 3 ? (days > 1 ? labels.symb_days : labels.symb_day) : labels.symb_d).replace('%d', days) + ' ' + text;
             }
          }
       }
       return text;
    }
 
-   this.showTimerPopup = function(id, link, name) {
-      // only if enabled in settings
-      if (popup_div && toast != null) {
-         popup_div = popup_div.replace(/%t/g, id);
-         popup_div = popup_div.replace(/%l/g, link);
-         popup_div = popup_div.replace(/%n/g, name);
-         $("#toast_body").html(popup_div);
-         toast.show();
+   this.startCount = function(task, type, time) {
+      const id = key(task, type);
+      if (id) {
+         counters.set(id, {task: Number(task), type, time: Math.max(0, Number(time) || 0), at: Date.now()});
+         draw(task, type, time);
       }
-   }
-
-   this.startCount = function(task, time) {
-      timer = setInterval(function () {
-         time += 1;
-         var timestr = window.actualTime.timeToText(time, 1);
-         $("[id^='actualtime_timer_" + task + "_']").text(timestr);
-         $("#toast_body span").text(timestr);
-      }, 1000);
-   }
-
-   this.endCount = function() {
-      clearInterval(timer);
-   }
-
-   this.fillCurrentTime = function(task, time) {
-      var timestr = window.actualTime.timeToText(time, 1);
-      $("[id^='actualtime_timer_" + task + "_']").text(timestr);
-   }
-
-   this.pressedButton = function(task, itemtype, val) {
-      jQuery.ajax({
-         type: "POST",
-         url: this.ajax_url,
-         dataType: 'json',
-         data: {action: val, task_id: task, itemtype: itemtype},
-         success: function (result) {
-            if (result['type'] == 'info') {
-               if (val == 'start') {
-                  window.actualTime.startCount(task, result['time']);
-                  $("[id^='actualtime_timer_" + task + "_']").css('color', 'red');
-                  $("[id^='actualtime_button_" + task + "_1_']").attr('value', text_pause).attr('action', 'pause').css('background-color', 'orange').prop('disabled', false);
-                  $("[id^='actualtime_button_" + task + "_1_']").html('<span>' + text_pause + '</span>');
-                  $("[id^='actualtime_button_" + task + "_2_']").attr('action', 'end').css('background-color', 'red').prop('disabled', false);
-                  window.actualTime.showTimerPopup(result['parent_id'], result['link'], result['name']);
-                  $("[id^='actualtime_faclock_" + task + "_']").addClass('fa-clock').css('color', 'red');
-                  return;
-               } else if ((val == 'end') || (val == 'pause')) {
-                  window.actualTime.endCount();
-                  //$("#actualtime_popup").remove();
-                  toast.hide();
-                  // Update all forms of this task (normal and modal)
-                  $("[id^='actualtime_timer_" + task + "_']").css('color', 'black');
-                  $("[id^='actualtime_faclock_" + task + "_']").css('color', 'black');
-                  var timestr = window.actualTime.timeToText(result['time'], 1);
-                  $("[id^='actualtime_timer_" + task + "_']").text(timestr);
-                  $("[id^='actualtime_segment_" + task + "_']").html(result['segment']);
-                  if (val == 'end') {
-                     // Update state fields also (as Done)
-                     $("select[name='state']").attr('data-track-changes', '');
-                     $("span.state.state_1[onclick='change_task_state(" + task + ", this)']").attr('title', text_done).toggleClass('state_1 state_2');
-                     $("input[type='hidden'][name='id'][value='" + task + "']").closest("div[data-itemtype='"+itemtype+"'][data-items-id='"+task+"']").find("select[name='state']").val(2).trigger('change');
-                     $("select[name='state']").removeAttr('data-track-changes');
-                     $("[id^='actualtime_button_" + task + "_']").attr('action', '').css('background-color', 'gray').prop('disabled', true);
-                     if (typeof result["task_time"] !== 'undefined' && result["task_time"] != 0) {
-                        var actiontime = $("input[type='hidden'][name='id'][value='" + task + "']").closest("div[data-itemtype='"+itemtype+"'][data-items-id='"+task+"']").find("select[name='actiontime']");
-                        actiontime.attr('data-track-changes', '');
-                        actiontime.val(result['task_time']).trigger('change');
-                        actiontime.removeAttr('data-track-changes');
-                        $("div[data-itemtype='"+itemtype+"'][data-items-id='"+task+"'] span.actiontime").text(window.actualTime.timeToText(result['task_time'], 1));
-                     }
-                  } else {
-                     $("[id^='actualtime_button_" + task + "_1_']").attr('value', text_restart).attr('action', 'start').css('background-color', 'green').prop('disabled', false);
-                     $("[id^='actualtime_button_" + task + "_1_']").html('<span>' + text_restart + '</span>');
-                  }
-               }
+   };
+   this.endCount = function(task, type) {
+      counters.delete(key(task, type));
+   };
+   this.fillCurrentTime = function(task, type, time) {
+      const counter = counters.get(key(task, type));
+      draw(task, type, counter ? elapsed(counter) : time);
+   };
+   this.showTimerPopup = function() { self.refresh(); };
+   this.showTaskForm = function(e, task, type) {
+      if (!key(task, type)) return;
+      if (e) e.preventDefault();
+      if (!modal) {
+         $('body').append("<div class='modal fade' id='modal_actualtime' role='dialog'><div class='modal-dialog modal-lg'><div id='actualtime_modal_content' class='modal-content'></div></div></div>");
+         modal = new bootstrap.Modal(document.getElementById('modal_actualtime'), {});
+      }
+      const request = ++modalRequest;
+      $('#actualtime_modal_content').attr('data-actualtime-task', key(task, type)).text(__('Loading...'));
+      modal.show();
+      $.ajax({type: 'GET', url: self.ajax_url, dataType: 'html', data: {showform: 1, task_id: task, itemtype: type}, cache: false})
+         .done(html => {
+            if (request === modalRequest) {
+               $('#actualtime_modal_content').html(html);
+               self.refresh();
             }
-            switch (result['type']) {
-               case 'warning':
-                  var title = __('Warning');
-                  var css_class = 'bg-warning';
-                  break;
-               case 'info':
-                  var title = _n("Information", "Informations", 1);
-                  var css_class = 'bg-info';
-                  break;
-               default:
-                  var title = __('Error');
-                  var css_class = 'bg-danger';
-                  break;
-            }
-            toast_id++;
-
-            const html = `<div class='toast-container bottom-0 end-0 p-3 messages_after_redirect'>
-               <div id='toast_js_${toast_id}' class='toast border-0 animate_animated animate__delay-2s animate__slow' role='alert' aria-live='assertive' aria-atomic='true'>
-                  <div class='toast-header ${css_class} text-white'>
-                     <strong class='me-auto'>${title}</strong>
-                     <button type='button' class='btn-close' data-bs-dismiss='toast' aria-label='${__('Close')}'></button>
-                  </div>
-                  <div class='toast-body'>
-                     ${result['message']}
-                  </div>
-               </div>
-            </div>`;
-            $('body').append(html);
-
-            const toasttemp = new bootstrap.Toast(document.querySelector('#toast_js_' + toast_id), {
-               delay: 10000,
+         }).fail(() => {
+            if (request === modalRequest) $('#actualtime_modal_content').text(labels.text_error);
+         });
+   };
+   this.pressedButton = function(task, type, action) {
+      const id = key(task, type);
+      if (!id || pending.has(id) || !['start', 'pause', 'end'].includes(action)) return;
+      pending.add(id);
+      ++generation;
+      elements(task, type, 'button').prop('disabled', true);
+      $.ajax({type: 'POST', url: self.ajax_url, dataType: 'json', data: {action, task_id: task, itemtype: type}})
+         .done(result => {
+            if (result.type === 'info' && result.runtime && key(result.task_id, result.itemtype) === id) {
+               applyState(result.runtime, true);
+               if (result.segment !== undefined) elements(task, type, 'segment').html(result.segment);
+               if (action === 'end') updateCompletedForm(task, type, result);
+               active = active.filter(state => key(state.task_id, state.itemtype) !== id);
+               if (result.runtime.own_active) active.push(result.runtime);
+               renderPopup();
+               try { localStorage.setItem('actualtime:changed', String(Date.now())); } catch (error) { /* polling still reconciles tabs */ }
+            } else notify(result);
+         })
+         .fail(() => notify({type: 'warning', message: labels.text_error}))
+         .always(() => {
+            pending.delete(id);
+            ++generation;
+            if (states.has(id)) applyState(states.get(id), true);
+            self.refresh();
+         });
+   };
+   this.refresh = function() {
+      if (!self.ajax_url) return;
+      if (syncing) { syncQueued = true; return; }
+      syncing = true;
+      const atGeneration = generation;
+      const watch = new Set(counters.keys());
+      $('[data-actualtime-task]').each(function() {
+         if (!discovered.has(this)) {
+            discovered.add(this);
+            newTargets.add($(this).attr('data-actualtime-task'));
+         }
+      });
+      newTargets.forEach(id => watch.add(id));
+      $.ajax({type: 'GET', url: self.ajax_url, dataType: 'json', cache: false, data: {footer: 1, watch: JSON.stringify(Array.from(watch).slice(0, 100))}})
+         .done(snapshot => {
+            if (atGeneration !== generation) { syncQueued = true; return; }
+            if (!Array.isArray(snapshot.states) || !Array.isArray(snapshot.active)) return;
+            watch.forEach(id => newTargets.delete(id));
+            Object.keys(labels).forEach(name => { if (typeof snapshot[name] === 'string') labels[name] = snapshot[name]; });
+            popupEnabled = Boolean(snapshot.show_popup);
+            active = snapshot.active.filter(state => state.own_active && key(state.task_id, state.itemtype));
+            const returned = new Set();
+            snapshot.states.forEach(state => {
+               returned.add(key(state.task_id, state.itemtype));
+               applyState(state, false);
             });
-            toasttemp.show();
-         }
-      });
-   }
-
+            counters.forEach((entry, id) => {
+               if (!returned.has(id) && !pending.has(id)) {
+                  counters.delete(id);
+                  elements(entry.task, entry.type, 'timer').text('–');
+                  elements(entry.task, entry.type, 'button').prop('disabled', true);
+               }
+            });
+            renderPopup();
+         })
+         .always(() => {
+            syncing = false;
+            if (syncQueued) { syncQueued = false; self.refresh(); }
+         });
+   };
    this.init = function(ajax_url) {
-      window.actualTime.ajax_url = ajax_url;
-      if (!$("#toast_actualtime").length) {
-         const html = `<div class='toast-container bottom-0 start-0 p-3 messages_after_redirect'  id='toast_actualtime'>
-            <div class='toast border-0 animate__animated animate__tada animate__delay-2s animate__slow' role='alert' aria-live='assertive' aria-atomic='true'>
-               <div class='toast-header bg-info text-white'>
-                  <strong class='me-auto'>${_n('Information', 'Informations', 1)}</strong>
-                  <button type='button' class='btn-close' data-bs-dismiss='toast' aria-label='${__('Close')}'></button>
-               </div>
-               <div id='toast_body' class='toast-body'></div>
-            </div>
-         </div>`;
-         $('body').append(html);
-         toast = new bootstrap.Toast(document.querySelector('#toast_actualtime .toast:not(.show)'), {autohide:false});
+      self.ajax_url = ajax_url;
+      if (!initialized) {
+         initialized = true;
+         $('body').append("<div class='toast-container bottom-0 start-0 p-3 messages_after_redirect' id='toast_actualtime'><div class='toast border-0' role='status' aria-live='polite'><div class='toast-header bg-info text-white'><strong class='me-auto'>" + _n('Information', 'Informations', 1) + "</strong><button type='button' class='btn-close' data-bs-dismiss='toast' aria-label='" + __('Close') + "'></button></div><div id='toast_body' class='toast-body'></div></div></div>");
+         toast = new bootstrap.Toast(document.querySelector('#toast_actualtime .toast'), {autohide: false});
+         $('#toast_actualtime button[data-bs-dismiss]').on('click', () => { popupDismissed = true; });
+         setInterval(tick, 1000);
+         setInterval(() => { if (!document.hidden) self.refresh(); }, 10000);
+         window.addEventListener('focus', () => self.refresh());
+         window.addEventListener('storage', event => { if (event.key === 'actualtime:changed') self.refresh(); });
+         document.addEventListener('visibilitychange', () => { if (!document.hidden) self.refresh(); });
       }
-
-      // Initialize
-      jQuery.ajax({
-         type: 'GET',
-         url: window.actualTime.ajax_url + '?footer',
-         dataType: 'json',
-         success: function (result) {
-            symb_d = result['symb_d'];
-            symb_day = result['symb_day'];
-            symb_days = result['symb_days'];
-            symb_h = result['symb_h'];
-            symb_hour = result['symb_hour'];
-            symb_hours = result['symb_hours'];
-            symb_min = result['symb_min'];
-            symb_minute = result['symb_minute'];
-            symb_minutes = result['symb_minutes'];
-            symb_s = result['symb_s'];
-            symb_second = result['symb_second'];
-            symb_seconds = result['symb_seconds'];
-            text_warning = result['text_warning'];
-            text_pause = result['text_pause'];
-            text_restart = result['text_restart'];
-            text_done = result['text_done'];
-            popup_div = result['popup_div'];
-
-            if (result['parent_id']) {
-               window.actualTime.startCount(result['task_id'], result['time']);
-               window.actualTime.showTimerPopup(result['parent_id'], result['link'], result['name']);
-            }
-         }
-      });
-   }
+      self.refresh();
+   };
 }();
 
-$(document).ready(function(){
-   var url = CFG_GLPI.root_doc+"/"+GLPI_PLUGINS_PATH.actualtime+"/ajax/timer.php";
-   window.actualTime.init(url);
+$(function() {
+   window.actualTime.init(CFG_GLPI.root_doc + '/' + GLPI_PLUGINS_PATH.actualtime + '/ajax/timer.php');
 });
