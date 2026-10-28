@@ -36,8 +36,17 @@ class Session
 class Plugin
 {
     public static $active = true;
+    public static $events = [];
+    public static $listener = null;
     public function isActivated($name) { return $name === 'actualtime' && self::$active; }
+    public static function isPluginActive($name) { return in_array($name, ['actualtime', 'autostatus'], true) && self::$active; }
     public static function getWebDir($name) { return '/plugins/' . $name; }
+    public static function doHook($name, $data = null) {
+        global $DB;
+        self::$events[] = ['name' => $name, 'data' => $data, 'in_transaction' => $DB->inTransaction()];
+        if (self::$listener !== null) { (self::$listener)($name, $data); }
+        return $data;
+    }
 }
 class Toolbox
 {
@@ -287,6 +296,8 @@ function resetFixture() {
     Session::$right = true;
     Session::$user = 7;
     Plugin::$active = true;
+    Plugin::$events = [];
+    Plugin::$listener = null;
     CommonDBTM::$denied = [];
     CommonDBTM::$deniedUpdate = [];
     CommonDBTM::$failUpdate = false;
@@ -553,3 +564,4 @@ foreach ([ChangeTask::class => Change::class, ProblemTask::class => Problem::cla
 if (!defined('ACTUALTIME_EXTENDED_TEST')) {
     echo "OK: $checks regression checks (GLPI adapters, no real database).\n";
 }
+

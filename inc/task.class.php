@@ -1330,7 +1330,7 @@ JAVASCRIPT;
     private static function runTimerAction(string $action, $task_id, $itemtype, $origin): array
     {
         try {
-            return PluginActualtimeManualtimer::withTaskLock($itemtype, $task_id, static function () use ($action, $task_id, $itemtype, $origin) {
+            $result = PluginActualtimeManualtimer::withTaskLock($itemtype, $task_id, static function () use ($action, $task_id, $itemtype, $origin) {
                 if ($origin !== self::AUTO) {
                     ['task' => $task, 'parent' => $parent] = PluginActualtimeRuntime::taskContext($itemtype, $task_id, UPDATE);
                     if (!PluginActualtimeRuntime::canControl($task)) {
@@ -1353,6 +1353,24 @@ JAVASCRIPT;
             Toolbox::logInFile('php-errors', 'ActualTime timer action: ' . $error->getMessage() . "\n");
             return ['type' => 'warning', 'message' => __('Could not update the timer. Refresh the task and try again.', 'actualtime')];
         }
+
+        // Direct SQL does not trigger CommonDBTM item hooks. Notify listeners
+        // only after withTaskLock succeeded (including its commit when owned).
+        // An optional integration failure must not report a saved timer as failed.
+        if (($result['type'] ?? '') === 'info') {
+            try {
+                Plugin::doHook('actualtime_timer_state_changed', [
+                    'action' => $action,
+                    'itemtype' => $itemtype,
+                    'items_id' => (int)$task_id,
+                    'timer_id' => (int)($result['timer_id'] ?? 0),
+                    'origin' => $origin,
+                ]);
+            } catch (Throwable $error) {
+                Toolbox::logInFile('php-errors', 'ActualTime timer hook: ' . $error->getMessage() . "\n");
+            }
+        }
+        return $result;
     }
 
     private static function startTimerUnlocked($task_id, $itemtype, $origin): array
@@ -1866,3 +1884,4 @@ JAVASCRIPT;
         $migration->dropTable($table);
     }
 }
+

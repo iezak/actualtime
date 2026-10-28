@@ -1,6 +1,6 @@
 # ActualTime London — ajuste de períodos anteriores
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.2**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -90,11 +90,43 @@ Em chamados, problemas e mudanças, encerrar mantém a conclusão da tarefa
 correspondente. Em projetos, encerrar o cronômetro mantém o estado de projeto
 configurado e atualiza a duração efetiva; não escolhe um estado final arbitrário.
 
-O código atual do repositório **iezak/autostatus**, revisado nesta etapa
-(commit 06a4e6f), usa eventos de criação de chamados, tarefas e acompanhamentos.
-Não contém um gancho direto para iniciar/pausar/encerrar ActualTime. Não foi
-necessária alteração nesse repositório. Regras de status e outras integrações
-instaladas no servidor devem ser conferidas na homologação.
+### Integração com AutoStatus
+
+A versão **3.2.6-london.2** publica o evento GLPI
+`actualtime_timer_state_changed` após uma operação nativa bem-sucedida de início,
+retomada, pausa ou encerramento. O evento sai depois de `withTaskLock` retornar,
+incluindo a confirmação da transação quando ela pertence à operação. Falhas de
+permissão, gravação ou confirmação não geram o evento. Consultas dos contadores e
+criação/edição/exclusão de períodos históricos também não geram esse evento.
+
+O payload contém `action` (`start`, `pause` ou `stop`), `itemtype`, `items_id`
+(ID da tarefa), `timer_id` (0 se encerrar uma tarefa já pausada) e `origin`.
+Os consumidores são opcionais: sem AutoStatus ativo, o cronômetro funciona
+normalmente; uma exceção no consumidor é registrada em `php-errors` e não muda
+o resultado de uma operação de cronômetro já gravada.
+
+O **AutoStatus 1.4.0** recebe esse evento. Habilite a integração na configuração
+do AutoStatus e escolha os status de início e de pausa/encerramento. O padrão é
+**Em atendimento** ao iniciar/retomar e **Pendente** quando o último cronômetro do
+chamado parar. Com **Aguardar todos os cronômetros do chamado = Sim**, parar uma
+tarefa não aplica pendente enquanto qualquer outro técnico/tarefa do mesmo
+chamado estiver rodando. Problemas, mudanças e projetos são ignorados pelo AutoStatus.
+Encerrar continua concluindo a tarefa no ActualTime; não soluciona o chamado.
+
+Atualize os dois plugins nas pastas existentes, sem desinstalar, primeiro no
+espelho com backup. A versão anterior do AutoStatus, que apenas observa a criação
+de tarefas, não acompanha os controles do cronômetro. As regras de status e
+acompanhamentos existentes permanecem configuráveis no AutoStatus.
+
+```bash
+php tests/regression/timer-events.php
+AUTOSTATUS_PLUGIN_DIR=../autostatus php tests/regression/timer-events.php
+```
+
+O segundo comando executa o AutoStatus real junto com as classes do ActualTime,
+usando adaptadores de GLPI e banco em memória. A homologação no GLPI deve incluir
+dois cronômetros no mesmo chamado, outro técnico, outro chamado e os filtros de
+status, além da preservação de chamados solucionados/fechados.
 
 ## Funcionalidades já validadas
 
@@ -316,3 +348,4 @@ edição ativa, exclusão confirmada, tarefas simultâneas, conflitos entre abas
 rollback e formulário.
 O ambiente real com GLPI/MySQL, concorrência entre
 requisições e interação visual precisam ser validados no espelho.
+
