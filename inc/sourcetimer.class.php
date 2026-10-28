@@ -258,6 +258,7 @@ JAVASCRIPT;
         echo "<div class='card-body border-top'>";
         echo "<h3>" . __('Existing timers', 'actualtime') . "</h3>";
         echo "<p class='text-muted'>" . __('Edit start and end dates. For a running timer, only the start can be changed.', 'actualtime') . "</p>";
+        echo "<p class='text-muted'>" . __('Moving the start earlier overwrites previous periods in this task: fully covered entries are deleted and a partially covered entry ends at the new start. Changes are recorded in history.', 'actualtime') . "</p>";
         echo "<form name='form' id='form' method='post' action='" . $this->getFormURL() . "' data-submit-once>";
         echo Html::hidden('itemtype', ['value' => $itemtype]);
         echo Html::hidden('items_id', ['value' => $items_id]);

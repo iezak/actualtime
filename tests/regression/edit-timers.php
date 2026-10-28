@@ -119,7 +119,8 @@ addPeriod();
 seedRunningTimer('2025-01-10 09:00:00');
 $input = editFixtureInput();
 $input['actual_begin'][2] = '2025-01-10 08:15:00';
-expectEditRejection($input, 'Active start cannot overlap an earlier closed period');
+check(editPeriod($input) === 2 && $DB->timers[0]['actual_end'] === '2025-01-10 08:15:00', 'Active start shortens the earlier closed period');
+$input = editFixtureInput();
 $input['actual_begin'][2] = '2025-01-10 08:30:00';
 check(editPeriod($input) === 1 && $DB->timers[1]['actual_end'] === null, 'Active start may touch the end of the previous period');
 

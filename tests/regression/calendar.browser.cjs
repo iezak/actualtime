@@ -18,6 +18,7 @@ assert.ok(glpi, 'Set ACTUALTIME_GLPI_CORE to a GLPI 10.0.26 source directory');
 const fixture = path.join(__dirname, 'manualtimer.php');
 const html = execFileSync(php, [fixture, '--render-calendar-fixture'], { encoding: 'utf8' });
 const activeHtml = execFileSync(php, [fixture, '--render-calendar-fixture', 'active'], { encoding: 'utf8' });
+const overlapHtml = execFileSync(php, [fixture, '--render-calendar-fixture', 'overlap'], { encoding: 'utf8' });
 const common = fs.readFileSync(path.join(glpi, 'js/common.js'), 'utf8');
 const localeHelper = common.match(/function getFlatPickerLocale\(language, region\) \{[\s\S]*?\n\}/);
 assert.ok(localeHelper, 'GLPI locale helper not found');
@@ -59,7 +60,7 @@ const server = http.createServer(async (req, res) => {
                     fixture, '--validate-calendar-values', fields.manual_begin, fields.manual_end,
                 ], { encoding: 'utf8' }))
                 : JSON.parse(execFileSync(php, [
-                    fixture, '--apply-edit-fixture', fields['original_end[1]'] === '' ? 'active' : 'closed', body,
+                    fixture, '--apply-edit-fixture', fields['original_end[2]'] ? 'overlap' : (fields['original_end[1]'] === '' ? 'active' : 'closed'), body,
                 ], { encoding: 'utf8' }));
             submitted.push({ fields, result, url: req.url });
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -74,9 +75,9 @@ const server = http.createServer(async (req, res) => {
     res.end(req.url.includes('/ajax/changetimer.php')
         ? html
         : req.url.startsWith('/editor')
-        ? (req.url.includes('active=1') ? activeHtml : html)
+        ? (req.url.includes('overlap=1') ? overlapHtml : (req.url.includes('active=1') ? activeHtml : html))
         : '<!doctype html><html lang="pt-BR"><body><iframe title="Timer editor" src="/editor'
-            + (req.url === '/active' ? '?active=1' : '') + '" style="width:100%;height:600px"></iframe></body></html>');
+            + (req.url === '/active' ? '?active=1' : (req.url === '/overlap' ? '?overlap=1' : '')) + '" style="width:100%;height:600px"></iframe></body></html>');
 });
 
 (async () => {
@@ -196,8 +197,32 @@ const server = http.createServer(async (req, res) => {
         assert.equal(submitted[3].result.task.actiontime, 0);
         assert.equal(submitted[3].result.task.state, 1);
         assert.match(submitted[3].result.history.at(-1).changes[2], /Deleted timer #1.*1800 seconds/);
+        for (const [time, expectedRows] of [['08:15:00', 2], ['08:00:00', 1]]) {
+            await page.goto(url + '/overlap');
+            editor = page.frameLocator('iframe');
+            const changedBegin = editor.locator('[name="actual_begin[2]"]');
+            const visibleBegin = changedBegin.locator('..').locator('input[type="text"]');
+            await visibleBegin.waitFor({state: 'visible'});
+            assert.match(await editor.locator('body').innerText(), /Moving the start earlier overwrites previous periods/);
+            await visibleBegin.fill('10/01/2025 ' + time);
+            await visibleBegin.press('Enter');
+            await editor.locator('button[name="update"]').click();
+            await page.waitForFunction(() => document.querySelector('iframe')?.contentDocument?.body?.textContent?.includes('Saved fixture'));
+            const result = submitted.at(-1).result;
+            assert.equal(result.changed, 2);
+            assert.equal(result.timers.length, expectedRows);
+            const selected = result.timers.find(timer => timer.id === 2);
+            assert.equal(selected.actual_begin, '2025-01-10 ' + time);
+            assert.equal(selected.actual_end, '2025-01-10 09:00:00');
+            assert.equal(result.task.actiontime, 3600);
+            if (expectedRows === 2) {
+                assert.equal(result.timers.find(timer => timer.id === 1).actual_end, selected.actual_begin);
+            } else {
+                assert.match(result.history.at(-2).changes[2], /Timer #1 was deleted because it was covered by timer #2/);
+            }
+        }
         assert.deepEqual(errors, []);
-        console.log('OK: original GLPI calendars, completed/running edits and separate deletion confirmation/cancel/save work inside an iframe.');
+        console.log('OK: original GLPI calendars, completed/running edits, confirmed deletion and earlier-start shortening/deletion work inside an iframe.');
     } finally {
         if (browser) await browser.close();
         await new Promise(resolve => server.close(resolve));

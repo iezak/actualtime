@@ -147,6 +147,31 @@ class PluginActualtimeManualtimer
         return ['task' => $task, 'timer' => $timer];
     }
 
+    /** Caller owns the task lock and transaction, including any audit writes. */
+    private static function deleteTimerRow($itemtype, $items_id, array $timer): void
+    {
+        global $DB;
+        if (!$DB->delete(PluginActualtimeTask::getTable(), [
+            'id' => (int)$timer['id'], 'itemtype' => $itemtype, 'items_id' => (int)$items_id,
+            'actual_begin' => $timer['actual_begin'], 'actual_end' => $timer['actual_end'],
+            'actual_actiontime' => $timer['actual_actiontime'], 'users_id' => $timer['users_id'],
+        ])) {
+            throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
+        }
+        if ($DB->affectedRows() !== 1) {
+            throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+        }
+        if (!$DB->delete(PluginActualtimeSourcetimer::getTable(), ['plugin_actualtime_tasks_id' => (int)$timer['id']])) {
+            throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
+        }
+    }
+
+    private static function overlaps(array $first, array $second): bool
+    {
+        return ($second['actual_end'] === null || $first['actual_begin'] < $second['actual_end'])
+            && ($first['actual_end'] === null || $second['actual_begin'] < $first['actual_end']);
+    }
+
     /** Delete only the confirmed saved period; totals and audit are atomic. */
     public static function deleteTimer($itemtype, $items_id, array $input): int
     {
@@ -158,19 +183,7 @@ class PluginActualtimeManualtimer
         return self::withTaskLock($itemtype, $items_id, static function () use ($itemtype, $items_id, $input, $DB) {
             ['task' => $task, 'timer' => $timer] = self::deletionPreview($itemtype, $items_id, $input);
             $id = (int)$timer['id'];
-            if (!$DB->delete(PluginActualtimeTask::getTable(), [
-                'id' => $id, 'itemtype' => $itemtype, 'items_id' => (int)$items_id,
-                'actual_begin' => $timer['actual_begin'], 'actual_end' => $timer['actual_end'],
-                'actual_actiontime' => $timer['actual_actiontime'], 'users_id' => $timer['users_id'],
-            ])) {
-                throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
-            }
-            if ($DB->affectedRows() !== 1) {
-                throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
-            }
-            if (!$DB->delete(PluginActualtimeSourcetimer::getTable(), ['plugin_actualtime_tasks_id' => $id])) {
-                throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
-            }
+            self::deleteTimerRow($itemtype, $items_id, $timer);
             self::updateDuration($task);
             $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
             $parent = new $parent_type();
@@ -253,16 +266,63 @@ class PluginActualtimeManualtimer
                 $pending[$id] = array_merge($before, $interval);
                 $changes[$id] = ['before' => $before, 'interval' => $interval];
             }
+            $requested = $changes;
+            $deleted = [];
+            foreach ($requested as $id => $change) {
+                $candidate = $pending[$id];
+                if ($candidate['actual_begin'] >= $change['before']['actual_begin']) {
+                    continue;
+                }
+                foreach ($pending as $previous_id => $previous) {
+                    if (
+                        $previous_id === $id || !self::overlaps($candidate, $previous)
+                        || $previous['actual_end'] === null
+                        || $rows[$previous_id]['actual_begin'] > $change['before']['actual_begin']
+                        || ($candidate['actual_end'] !== null && $previous['actual_end'] > $candidate['actual_end'])
+                    ) {
+                        continue;
+                    }
+                    if (count($requested) !== 1) {
+                        throw new InvalidArgumentException(__('To overwrite previous periods, edit one timer at a time.', 'actualtime'));
+                    }
+                    // Never delete/shorten an unseen period or one changed in another tab.
+                    if (
+                        ($input['original_begin'][$previous_id] ?? null) !== (string)$rows[$previous_id]['actual_begin']
+                        || ($input['original_end'][$previous_id] ?? null) !== (string)$rows[$previous_id]['actual_end']
+                    ) {
+                        throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
+                    }
+                    if ($candidate['actual_begin'] <= $previous['actual_begin']) {
+                        $deleted[$previous_id] = ['before' => $rows[$previous_id], 'replacing_id' => $id];
+                        unset($pending[$previous_id], $changes[$previous_id]);
+                    } else {
+                        $interval = self::validateInterval($previous['actual_begin'], $candidate['actual_begin'], $now);
+                        $pending[$previous_id] = array_merge($previous, $interval);
+                        $changes[$previous_id] = ['before' => $rows[$previous_id], 'interval' => $interval, 'replacing_id' => $id];
+                    }
+                }
+            }
             foreach ($changes as $id => $change) {
                 $candidate = $pending[$id];
                 foreach ($pending as $other_id => $other) {
-                    if (
-                        $id !== $other_id
-                        && ($other['actual_end'] === null || $candidate['actual_begin'] < $other['actual_end'])
-                        && ($candidate['actual_end'] === null || $other['actual_begin'] < $candidate['actual_end'])
-                    ) {
+                    if ($id !== $other_id && self::overlaps($candidate, $other)) {
                         throw new InvalidArgumentException(__('The interval overlaps an existing timer for this task.', 'actualtime'));
                     }
+                }
+            }
+            $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
+            $parent = new $parent_type();
+            foreach ($deleted as $previous_id => $deletion) {
+                $before = $deletion['before'];
+                self::deleteTimerRow($itemtype, $items_id, $before);
+                $message = sprintf(
+                    __('Timer #%1$d was deleted because it was covered by timer #%2$d: %3$s - %4$s, technician #%5$d (%6$d seconds).', 'actualtime'),
+                    $previous_id, $deletion['replacing_id'], $before['actual_begin'], $before['actual_end'],
+                    $before['users_id'], $before['actual_actiontime']
+                );
+                if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+                    [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
+                    throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
                 }
             }
             foreach ($changes as $id => $change) {
@@ -289,13 +349,14 @@ class PluginActualtimeManualtimer
                 ]) || $DB->affectedRows() !== 1) {
                     throw new UnexpectedValueException(__('A timer changed while the editor was open. Review its latest values.', 'actualtime'));
                 }
-                $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
-                $parent = new $parent_type();
                 $message = sprintf(
                     __('Timer #%1$d, task #%2$d: %3$s / %4$s -> %5$s / %6$s.', 'actualtime'),
                     $id, $items_id, $before['actual_begin'], $before['actual_end'] ?? __('In progress'),
                     $change['interval']['actual_begin'], $change['interval']['actual_end'] ?? __('In progress')
                 );
+                if (isset($change['replacing_id'])) {
+                    $message .= ' ' . sprintf(__('Automatically adjusted to meet timer #%d.', 'actualtime'), $change['replacing_id']);
+                }
                 if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
                     [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
                     throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
@@ -304,7 +365,7 @@ class PluginActualtimeManualtimer
             if ($changes) {
                 self::updateDuration($task);
             }
-            return count($changes);
+            return count($changes) + count($deleted);
         });
     }
 

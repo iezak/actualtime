@@ -20,6 +20,20 @@ msgstr "Informe o início e o término do período trabalhado."
 msgid "Existing timers"
 msgstr "Apontamentos existentes"
 
+msgid "Moving the start earlier overwrites previous periods in this task: fully covered entries are deleted and a partially covered entry ends at the new start. Changes are recorded in history."
+msgstr "Ao antecipar o início, o período editado prevalece nesta tarefa: apontamentos anteriores totalmente cobertos são excluídos e o parcialmente coberto termina no novo início. As alterações ficam no histórico."
+
+msgid "To overwrite previous periods, edit one timer at a time."
+msgstr "Para sobrescrever períodos anteriores, ajuste um apontamento por vez e salve."
+
+#, php-format
+msgid "Automatically adjusted to meet timer #%d."
+msgstr "Ajustado automaticamente para coincidir com o início do apontamento #%d."
+
+#, php-format
+msgid "Timer #%1$d was deleted because it was covered by timer #%2$d: %3$s - %4$s, technician #%5$d (%6$d seconds)."
+msgstr "Apontamento #%1$d excluído por ter sido coberto pelo apontamento #%2$d: %3$s - %4$s, técnico #%5$d (%6$d segundos)."
+
 msgid "Actual time follows the recorded technician; task duration follows the current assignee."
 msgstr "O tempo real segue o técnico do apontamento; a duração da tarefa segue o responsável atual."
 
