@@ -129,6 +129,11 @@ class CommonDBTM
 class CommonITILObject extends CommonDBTM {
     public const SOLVED = 5;
     public static function getTaskClass() { return static::class . 'Task'; }
+    public static function getStatus($value) { return self::getAllowedStatusArray($value)[$value]; }
+    public static function getStatusClass($value) { return 'itilstatus status-' . $value; }
+    public static function getAllowedStatusArray($current) {
+        return [1 => 'New', 2 => 'Processing (assigned)', 3 => 'Processing (planned)', 4 => 'Pending', 5 => 'Solved', 6 => 'Closed'];
+    }
 }
 class Ticket extends CommonITILObject {}
 class Change extends CommonITILObject {}
