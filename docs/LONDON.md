@@ -1,10 +1,39 @@
-# ActualTime London — revisão final
+# ActualTime London — ajuste de períodos anteriores
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.5-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.1**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
 ## Entrega atual
+
+Ao editar um apontamento em **Modify timers** e antecipar seu início, o período
+editado passa a prevalecer sobre períodos anteriores encerrados da **mesma tarefa**:
+
+- Um período totalmente coberto é excluído.
+- Um período parcialmente coberto passa a terminar no novo início.
+- O apontamento editado mantém seu ID, técnico e término; se estava ativo,
+  continua ativo. As durações e o total são recalculados.
+
+Exemplo, em um dia passado: A **08:00–08:30** e B **08:30–09:00**.
+Alterar o início de B para **08:15** deixa A **08:00–08:15** e B
+**08:15–09:00**, totalizando uma hora. Alterar B para começar às **08:00**
+exclui A e deixa B **08:00–09:00**. Um recuo maior pode excluir vários períodos
+e encurtar apenas o trecho restante do período anterior.
+
+Salvar realiza o ajuste em uma operação. O histórico registra o autor, os
+horários alterados e qual apontamento prevaleceu. Na exclusão automática,
+preserva também os dados do período removido; seu registro de primeira
+modificação é removido junto. O primeiro registro original de um período apenas
+encurtado é mantido.
+
+Para sobrescrever períodos anteriores, altere um apontamento por vez e salve.
+Se um período afetado tiver mudado em outra aba ou não estiver no editor aberto,
+a gravação pede revisão dos valores atuais. Em falha, toda a operação é desfeita.
+Outras tarefas, períodos posteriores e a criação manual mantêm suas validações.
+Uma sobreposição que envolva intervalos fora desse recuo não é resolvida por
+exclusão/encurtamento automático.
+
+## Estatísticas e relatórios
 
 As quatro funções foram homologadas nas etapas anteriores. Esta revisão corrige
 diferenças encontradas nas estatísticas e nos relatórios opcionais do Reports.
@@ -120,10 +149,11 @@ acesso à tarefa (inclusive privada) e ao item pai, a entidade, a existência do
 e seu estado. Chamados/problemas/mudanças solucionados ou fechados, projetos
 excluídos e tarefas de projeto finalizadas mantêm o bloqueio.
 
-São rejeitados datas inválidas, término igual/anterior ao início, término futuro,
-duplicatas e sobreposição com outro apontamento da **mesma tarefa**, inclusive
-com um cronômetro ativo. Intervalos adjacentes são permitidos. O início de um
-cronômetro ativo não pode ficar no futuro.
+São rejeitados datas inválidas, término igual/anterior ao início, término futuro
+e duplicatas na criação manual. A criação não permite sobreposição na mesma
+tarefa. Na edição, antecipar o início segue a substituição descrita acima;
+demais sobreposições continuam bloqueadas. Intervalos adjacentes são permitidos.
+O início de um cronômetro ativo não pode ficar no futuro.
 
 O lote de edição inteiro é validado antes de gravar: um erro impede todas as
 alterações daquele envio. As datas propostas permanecem preenchidas após um
@@ -150,10 +180,10 @@ tempo já transcorrido do cronômetro ativo, quando houver um.
    ativos antes de substituir os arquivos.
 3. Após mesclar a PR desta etapa em **london/glpi10**, atualize essa branch pelo
    LondonPluginManager. Para testar antes da mesclagem, selecione a branch
-   **london/etapa-5-revisao-estatisticas**. Use a mesma pasta **actualtime**.
+   **london/ajuste-sobreposicao-inicio**. Use a mesma pasta **actualtime**.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI, confirme **3.2.5-london.1** e use **Ctrl+F5** para
+5. Limpe o cache do GLPI, confirme **3.2.6-london.1** e use **Ctrl+F5** para
    carregar o JavaScript atualizado.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.
@@ -169,6 +199,12 @@ Use um dia passado e um chamado aberto com uma tarefa salva:
 
 | Teste | Resultado esperado |
 |---|---|
+| A 08:00–08:30 e B 08:30–09:00; antecipar B para 08:15 | A termina 08:15; B vai de 08:15 a 09:00; total de 1 h |
+| Na mesma situação inicial, antecipar B para 08:00 | A excluído; ID de B mantido; B 08:00–09:00 |
+| A 07:00–08:00, B 08:00–08:30 e C 08:30–09:00; antecipar C para 07:30 | A termina 07:30, B excluído e C 07:30–09:00 |
+| Antecipar um cronômetro ativo sobre período anterior encerrado | Ajuste/exclusão anterior sem pausar o ativo |
+| Conferir histórico após salvar | Autor, datas e apontamento que causou a substituição registrados |
+| Outra tarefa ativa durante a substituição | Continua contando sem alteração |
 | Com dois cronômetros ativos, abrir/recarregar estatísticas do chamado | Soma da coluna ActualTime por técnico igual ao total ActualTime do chamado |
 | Trocar responsável de tarefa com períodos já gravados | Tempo antigo continua com o técnico do apontamento |
 | Nome de técnico com aspas | Estatísticas carregam normalmente e mostram o nome como texto |
@@ -202,7 +238,7 @@ Use um dia passado e um chamado aberto com uma tarefa salva:
 | Abrir novamente Modify timers e conferir histórico do chamado | Horários salvos; histórico com autor e valores antes/depois |
 | Iniciar um cronômetro e corrigir o início para 10 min antes | Continua ativo; total considera o novo início após recarregar |
 | Pausar, retomar e encerrar esse cronômetro | Tempos calculados a partir do início corrigido; controles funcionam |
-| Editar com término anterior ao início, data futura ou sobreposição | Erro; nenhuma alteração do lote é salva |
+| Editar com término anterior ao início, data futura ou sobreposição fora da regra de recuo | Erro; nenhuma alteração do lote é salva |
 | Abrir editor em duas abas; salvar uma mudança diferente em cada | Segunda mudança é bloqueada; mostra os valores mais recentes |
 | Tarefa sem apontamentos; abrir Modify timers | Formulário de criação disponível |
 | Adicionar 08:00–08:30 | Registro de 30 min, técnico correto e histórico com autor |
@@ -240,6 +276,7 @@ Executar na raiz do plugin com PHP 8.1 ou posterior:
     php tests/regression/delete-timers.php
     php tests/regression/concurrent-timers.php
     php tests/regression/statistics.php
+    php tests/regression/overlap-edit.php
     python tests/regression/reports.sql.py
 
 Para testar com a classe Html real do GLPI 10.0.26, informe a raiz de uma cópia
@@ -251,6 +288,7 @@ o banco real:
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/delete-timers.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/concurrent-timers.php
     ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/statistics.php
+    ACTUALTIME_GLPI_CORE=/caminho/glpi-10.0.26 php tests/regression/overlap-edit.php
 
 Com Playwright/Chromium, jQuery 3.6.0 e Flatpickr 4.6.13 disponíveis, o teste de
 navegador usa a classe Html e os helpers JavaScript do GLPI 10.0.26. Abre o

@@ -1,8 +1,8 @@
 # ActualTime
 
 > **Fork London — GLPI 10 / base 3.2.0.** Inclui tarefas simultâneas, criação
-> manual, edição e exclusão de apontamentos. A revisão final alinha os totais por
-> técnico e corrige os relatórios opcionais do Reports.
+> manual, edição e exclusão de apontamentos. Ao antecipar o início, períodos
+> anteriores sobrepostos são ajustados ou excluídos, com registro no histórico.
 > Veja o [guia de atualização e testes](docs/LONDON.md).
 
 <img src="https://raw.githubusercontent.com/ticgal/actualtime/multimedia/actualtime.png" alt="ActualTime Logo" height="250px" width="250px" class="js-lazy-loaded">

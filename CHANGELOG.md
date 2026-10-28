@@ -1,5 +1,22 @@
 # Actualtime
 
+## [3.2.6-london.1] - 2026-10-28
+
+### Changed
+
+- Moving an existing timer's start earlier takes precedence over prior closed
+  periods in the same task. Delete fully covered periods and shorten a partially
+  covered period to end exactly at the edited start.
+- Apply the same behavior to a running timer without pausing it. Keep the edited
+  timer ID and each remaining period's technician; recalculate durations/totals.
+- Audit automatic shortening/deletion with the replacing timer ID, remove native
+  snapshots of deleted periods and retain the first snapshot of shortened ones.
+- Validate the whole operation under the task lock and transaction. Recheck
+  snapshots before touching earlier periods; conflicting batch edits ask for one
+  timer at a time. Other tasks and later periods remain outside this replacement.
+- Show the rule in the editor and cover partial/full/multiple replacements,
+  rollback, stale forms and the original GLPI calendar in regression tests.
+
 ## [3.2.5-london.1] - 2026-10-28
 
 ### Fixed

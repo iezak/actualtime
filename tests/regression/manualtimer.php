@@ -354,7 +354,10 @@ if (($argv[1] ?? '') === '--apply-delete-fixture') {
 
 if (($argv[1] ?? '') === '--render-calendar-fixture') {
     resetFixture();
-    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else { addPeriod(); }
+    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else {
+        addPeriod();
+        if (($argv[2] ?? '') === 'overlap') { addPeriod('2025-01-10 08:30:00', '2025-01-10 09:00:00'); }
+    }
     echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">';
     echo '<link rel="stylesheet" href="/assets/flatpickr.css">';
     echo '<style>body{font:16px sans-serif;padding:16px}label{display:block}input{padding:8px;max-width:100%}.mb-3{margin-bottom:12px}[data-toggle]{display:inline-block;min-width:24px;min-height:24px;cursor:pointer}[data-toggle]::before{content:"▦"}</style>';
@@ -370,7 +373,10 @@ if (($argv[1] ?? '') === '--render-calendar-fixture') {
 
 if (($argv[1] ?? '') === '--apply-edit-fixture') {
     resetFixture();
-    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else { addPeriod(); }
+    if (($argv[2] ?? '') === 'active') { seedRunningTimer(); } else {
+        addPeriod();
+        if (($argv[2] ?? '') === 'overlap') { addPeriod('2025-01-10 08:30:00', '2025-01-10 09:00:00'); }
+    }
     parse_str($argv[3] ?? '', $input);
     $changed = PluginActualtimeManualtimer::edit(TicketTask::class, 10, $input);
     echo json_encode(['changed' => $changed, 'timers' => $DB->timers, 'sources' => $DB->sources, 'history' => Log::$entries,
