@@ -1342,11 +1342,9 @@ JAVASCRIPT;
                 }
                 $method = $action . 'TimerUnlocked';
                 $result = self::$method($task_id, $itemtype, $origin);
+                $result['type'] = $result['type'] ?? 'warning';
                 $result['task_id'] = (int)$task_id;
                 $result['itemtype'] = $itemtype;
-                if ($origin !== self::AUTO && $result['type'] === 'info') {
-                    $result['runtime'] = PluginActualtimeRuntime::taskState($itemtype, $task_id);
-                }
                 return $result;
             });
         } catch (Throwable $error) {
@@ -1368,6 +1366,15 @@ JAVASCRIPT;
                 ]);
             } catch (Throwable $error) {
                 Toolbox::logInFile('php-errors', 'ActualTime timer hook: ' . $error->getMessage() . "\n");
+            }
+            // AutoStatus may have changed the parent. Read the displayed state
+            // after integrations run, instead of returning the pre-hook status.
+            if ($origin !== self::AUTO) {
+                try {
+                    $result['runtime'] = PluginActualtimeRuntime::taskState($itemtype, $task_id);
+                } catch (Throwable $error) {
+                    Toolbox::logInFile('php-errors', 'ActualTime timer snapshot: ' . $error->getMessage() . "\n");
+                }
             }
         }
         return $result;

@@ -69,6 +69,12 @@ Session::$user = 99;
 PluginActualtimeTask::pauseTimer(10, TicketTask::class, PluginActualtimeTask::AUTO);
 check(Plugin::$events[1]['data']['origin'] === PluginActualtimeTask::AUTO, 'Trusted automatic pause also notifies subscribers');
 eventFixture();
+Plugin::$listener = static function () { CommonDBTM::$records[Ticket::class][1]['status'] = 3; };
+$result = nativeAction('start');
+check($result['runtime']['parent_status']['value'] === 3, 'Action response reads the parent status after the integration hook');
+check($result['runtime']['parent_status']['label'] === 'Processing (planned)', 'Snapshot contains the server status label');
+check(isset($result['runtime']['parent_status']['options'][3]), 'Snapshot carries permitted dropdown choices for the new status');
+eventFixture();
 PluginActualtimeManualtimer::create(TicketTask::class, 10, '2025-01-10 08:00:00', '2025-01-10 08:30:00');
 check(Plugin::$events === [], 'Historical entries do not simulate a live timer event');
 
@@ -124,12 +130,13 @@ if ($autostatus) {
     function ticketStatus(int $id = 1): int { return CommonDBTM::$records[Ticket::class][$id]['status']; }
 
     integrationFixture();
-    check(nativeAction('start')['type'] === 'info' && ticketStatus() === 2, 'Real ActualTime start changes the real AutoStatus ticket status');
+    $result = nativeAction('start');
+    check($result['type'] === 'info' && ticketStatus() === 2 && $result['runtime']['parent_status']['value'] === 2, 'Real ActualTime start returns the status saved by the real AutoStatus');
     PluginActualtimeTask::startTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
     nativeAction('pause');
     check(ticketStatus() === 2, 'Pausing one of two tasks on the same ticket keeps it in progress');
-    PluginActualtimeTask::pauseTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
-    check(ticketStatus() === 4, 'Pausing the last task sets the ticket pending');
+    $result = PluginActualtimeTask::pauseTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
+    check(ticketStatus() === 4 && $result['runtime']['parent_status']['value'] === 4, 'Pausing the last task immediately returns pending');
     nativeAction('start');
     check(ticketStatus() === 2, 'Resume restores in progress');
     PluginActualtimeTask::startTimer(12, TicketTask::class, PluginActualtimeTask::WEB);

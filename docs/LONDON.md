@@ -1,6 +1,6 @@
 # ActualTime London — ajuste de períodos anteriores
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.2**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.3**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -127,6 +127,36 @@ O segundo comando executa o AutoStatus real junto com as classes do ActualTime,
 usando adaptadores de GLPI e banco em memória. A homologação no GLPI deve incluir
 dois cronômetros no mesmo chamado, outro técnico, outro chamado e os filtros de
 status, além da preservação de chamados solucionados/fechados.
+
+### Atualização do status na tela, sem F5
+
+Na versão **3.2.6-london.3**, iniciar, retomar, pausar ou encerrar também atualiza
+o status exibido no chamado aberto. A resposta do cronômetro consulta o estado
+**depois** que o AutoStatus processa o evento e inclui o status gravado, seu rótulo,
+ícone e as opções de transição permitidas pelo perfil.
+
+O navegador atualiza o seletor Select2, o ícone do painel e o campo de status em
+modo de leitura, apenas quando o chamado aberto corresponde à tarefa controlada.
+A página permanece aberta: assuntos, descrições e outros textos ainda não salvos
+são preservados. Uma escolha manual de status ainda não salva também é preservada.
+Essa atualização automática não marca o formulário como alterado nem abre diálogos
+de mudança de status. A sincronização entre abas aproveita as consultas existentes
+dos cronômetros e continua descartando respostas anteriores a uma ação.
+
+Este ajuste precisa atualizar somente o **ActualTime**; o AutoStatus 1.4.0 já
+instalado continua sendo o responsável pelas regras de status.
+
+O teste de navegador usa Playwright, jQuery e Select2, com PHP e os adaptadores de
+GLPI do repositório. É possível usar o código real de rastreamento de alterações
+do GLPI 10.0.26 informando a pasta do core:
+
+```bash
+ACTUALTIME_STATUS_GLPI_CORE=/caminho/glpi node tests/regression/concurrent.browser.cjs
+```
+
+Os cenários incluem início/pausa/retomada sem recarregar, seletor e status de leitura,
+preservação de rascunhos e de escolhas manuais, respostas atrasadas, outra aba e
+cronômetros simultâneos. No espelho, confira o painel do chamado após cada ação.
 
 ## Funcionalidades já validadas
 

@@ -63,7 +63,7 @@ class PluginActualtimeRuntime
             }
         }
         $disable = PluginActualtimeTask::disableButton($task);
-        return [
+        $state = [
             'task_id' => (int)$items_id, 'itemtype' => $itemtype,
             'parent_id' => (int)$parent->getID(), 'parent_type' => $parent->getType(),
             'name' => $parent->getTypeName(1), 'link' => $parent->getFormURLWithID($parent->getID()),
@@ -74,6 +74,16 @@ class PluginActualtimeRuntime
                 && (!($parent instanceof CommonITILObject) || (int)$parent->fields['status'] < CommonITILObject::SOLVED),
             'task_time' => (int)($task->fields['actiontime'] ?? $task->fields['effective_duration'] ?? 0),
         ];
+        if ($parent instanceof Ticket) {
+            $status = (int)$parent->fields['status'];
+            $state['parent_status'] = [
+                'value' => $status,
+                'label' => $parent::getStatus($status),
+                'icon' => $parent::getStatusClass($status),
+                'options' => $parent::getAllowedStatusArray($status),
+            ];
+        }
+        return $state;
     }
 
     /** All current-user timers the active profile is allowed to read. */
