@@ -1,6 +1,6 @@
 # ActualTime London — ajuste de períodos anteriores
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.3**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.5**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -90,73 +90,62 @@ Em chamados, problemas e mudanças, encerrar mantém a conclusão da tarefa
 correspondente. Em projetos, encerrar o cronômetro mantém o estado de projeto
 configurado e atualiza a duração efetiva; não escolhe um estado final arbitrário.
 
-### Integração com AutoStatus
+### Eventos para integrações
 
-A versão **3.2.6-london.2** publica o evento GLPI
-`actualtime_timer_state_changed` após uma operação nativa bem-sucedida de início,
-retomada, pausa ou encerramento. O evento sai depois de `withTaskLock` retornar,
-incluindo a confirmação da transação quando ela pertence à operação. Falhas de
-permissão, gravação ou confirmação não geram o evento. Consultas dos contadores e
-criação/edição/exclusão de períodos históricos também não geram esse evento.
+O ActualTime **3.2.6-london.5** cuida dos apontamentos, durações, controles e
+contadores. Ele publica eventos genéricos para consumidores opcionais:
 
-O payload contém `action` (`start`, `pause` ou `stop`), `itemtype`, `items_id`
-(ID da tarefa), `timer_id` (0 se encerrar uma tarefa já pausada) e `origin`.
-Os consumidores são opcionais: sem AutoStatus ativo, o cronômetro funciona
-normalmente; uma exceção no consumidor é registrada em `php-errors` e não muda
-o resultado de uma operação de cronômetro já gravada.
+- PHP/GLPI: `actualtime_timer_state_changed`, após uma operação nativa bem-sucedida
+  de início, pausa ou encerramento. O payload contém `action` (start, pause, stop),
+  `itemtype`, `items_id` (tarefa), `timer_id` e `origin`.
+- Navegador: `actualtime:timer-changed`, após o controle selecionado ser atualizado.
+  O payload contém `action`, `task_id`, `itemtype`, `parent_id` e `parent_type`.
 
-O **AutoStatus 1.4.0** recebe esse evento. Habilite a integração na configuração
-do AutoStatus e escolha os status de início e de pausa/encerramento. O padrão é
-**Em atendimento** ao iniciar/retomar e **Pendente** quando o último cronômetro do
-chamado parar. Com **Aguardar todos os cronômetros do chamado = Sim**, parar uma
-tarefa não aplica pendente enquanto qualquer outro técnico/tarefa do mesmo
-chamado estiver rodando. Problemas, mudanças e projetos são ignorados pelo AutoStatus.
-Encerrar continua concluindo a tarefa no ActualTime; não soluciona o chamado.
+O evento PHP sai após `withTaskLock` retornar, incluindo a confirmação da transação
+quando ela pertence à operação. Rejeições ou operações revertidas não geram evento.
+Consultas e alterações históricas também não simulam um controle de cronômetro.
+Uma falha no consumidor é registrada sem transformar uma operação já gravada em erro.
 
-Atualize os dois plugins nas pastas existentes, sem desinstalar, primeiro no
-espelho com backup. A versão anterior do AutoStatus, que apenas observa a criação
-de tarefas, não acompanha os controles do cronômetro. As regras de status e
-acompanhamentos existentes permanecem configuráveis no AutoStatus.
+O contrato não contém rótulos, ícones, opções ou regras de status do chamado.
+Os contadores e controles funcionam sem qualquer consumidor instalado.
+
+### Integração opcional com AutoStatus
+
+O **AutoStatus 1.5.0** é responsável pelas regras de status e por sua apresentação
+na tela. Ele recebe os eventos do ActualTime e acompanha tarefas e acompanhamentos
+do GLPI. Seu próprio JavaScript e endpoint de leitura atualizam o painel, inclusive
+em chamados sem tarefas ou cronômetros e com o ActualTime desativado.
+
+O padrão da integração continua sendo **Em atendimento** ao iniciar/retomar e
+**Pendente** quando o último cronômetro do chamado parar, conforme a configuração
+do AutoStatus. Encerrar mantém a conclusão da tarefa e a atualização de duração
+no ActualTime. O AutoStatus decide o status do chamado.
+
+Para migrar a atualização visual das versões london.3/london.4, atualize primeiro o
+**AutoStatus para 1.5.0** e depois o **ActualTime para 3.2.6-london.5**, nas pastas
+existentes, sem desinstalar. O AutoStatus também reconhece respostas das versões
+anteriores do ActualTime durante a atualização.
+
+### Validação dos contratos
+
+No ActualTime:
 
 ```bash
 php tests/regression/timer-events.php
-AUTOSTATUS_PLUGIN_DIR=../autostatus php tests/regression/timer-events.php
+php tests/regression/concurrent-timers.php
+node tests/regression/concurrent.browser.cjs
 ```
 
-O segundo comando executa o AutoStatus real junto com as classes do ActualTime,
-usando adaptadores de GLPI e banco em memória. A homologação no GLPI deve incluir
-dois cronômetros no mesmo chamado, outro técnico, outro chamado e os filtros de
-status, além da preservação de chamados solucionados/fechados.
-
-### Atualização do status na tela, sem F5
-
-Na versão **3.2.6-london.3**, iniciar, retomar, pausar ou encerrar também atualiza
-o status exibido no chamado aberto. A resposta do cronômetro consulta o estado
-**depois** que o AutoStatus processa o evento e inclui o status gravado, seu rótulo,
-ícone e as opções de transição permitidas pelo perfil.
-
-O navegador atualiza o seletor Select2, o ícone do painel e o campo de status em
-modo de leitura, apenas quando o chamado aberto corresponde à tarefa controlada.
-A página permanece aberta: assuntos, descrições e outros textos ainda não salvos
-são preservados. Uma escolha manual de status ainda não salva também é preservada.
-Essa atualização automática não marca o formulário como alterado nem abre diálogos
-de mudança de status. A sincronização entre abas aproveita as consultas existentes
-dos cronômetros e continua descartando respostas anteriores a uma ação.
-
-Este ajuste precisa atualizar somente o **ActualTime**; o AutoStatus 1.4.0 já
-instalado continua sendo o responsável pelas regras de status.
-
-O teste de navegador usa Playwright, jQuery e Select2, com PHP e os adaptadores de
-GLPI do repositório. É possível usar o código real de rastreamento de alterações
-do GLPI 10.0.26 informando a pasta do core:
+A integração com regras e UI é validada no repositório que a possui, o AutoStatus:
 
 ```bash
-ACTUALTIME_STATUS_GLPI_CORE=/caminho/glpi node tests/regression/concurrent.browser.cjs
+cd ../autostatus
+ACTUALTIME_PLUGIN_DIR=../actualtime php tests/regression/actualtime-integration.php
+AUTOSTATUS_GLPI_CORE=/caminho/glpi node tests/regression/status.browser.cjs
 ```
 
-Os cenários incluem início/pausa/retomada sem recarregar, seletor e status de leitura,
-preservação de rascunhos e de escolhas manuais, respostas atrasadas, outra aba e
-cronômetros simultâneos. No espelho, confira o painel do chamado após cada ação.
+Os testes usam adaptadores de GLPI e banco em memória. No espelho, confira os
+contadores com AutoStatus desativado e depois os status com AutoStatus ativo.
 
 ## Funcionalidades já validadas
 
@@ -245,7 +234,7 @@ tempo já transcorrido do cronômetro ativo, quando houver um.
    **london/ajuste-sobreposicao-inicio**. Use a mesma pasta **actualtime**.
 4. Atualize o código e execute a atualização do plugin oferecida pelo GLPI.
    **Não desinstale**: a desinstalação original elimina a tabela de apontamentos.
-5. Limpe o cache do GLPI, confirme **3.2.6-london.1** e use **Ctrl+F5** para
+5. Limpe o cache do GLPI, confirme **3.2.6-london.5** e use **Ctrl+F5** para
    carregar o JavaScript atualizado.
 6. Verifique a permissão de perfil em **ActualTime > Modify timers**, por tipo
    de tarefa. Atualizar o código não concede direitos novos automaticamente.

@@ -1,8 +1,7 @@
 /**
  * Actual PHP task controls/runtime + actual browser AJAX and counters.
  * Bootstrap lifecycle is adapted; ACTUALTIME_GLPI_CORE selects the real Html.
- * Requires PHP, Playwright/Chromium, jQuery and Select2 4.x.
- * ACTUALTIME_STATUS_GLPI_CORE optionally loads GLPI's real unsaved-form tracker.
+ * Requires the same PHP/Playwright/jQuery setup as calendar.browser.cjs.
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 const assert = require('node:assert/strict');
@@ -11,10 +10,6 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { chromium } = require('playwright');
-const core = process.env.ACTUALTIME_STATUS_GLPI_CORE;
-const common = core ? fs.readFileSync(path.join(core, 'js/common.js'), 'utf8') : '';
-const tracking = common.match(/window\.glpiUnsavedFormChanges = false;\n\$\(document\)\.ready\(function\(\) \{[\s\S]*?\n\}\);/);
-if (core) assert.ok(tracking, 'GLPI unsaved-form tracker not found');
 const php = process.env.PHP_BINARY || 'php';
 const fixture = path.join(__dirname, 'concurrent-timers.php');
 let state = '';
@@ -30,7 +25,6 @@ function backend(mode, data = {}) {
 const assets = {
     '/assets/jquery.js': fs.readFileSync(require.resolve('jquery/dist/jquery.min.js')),
     '/assets/runtime.js': fs.readFileSync(path.join(__dirname, '../../js/actualtime.js')),
-    '/assets/select2.js': fs.readFileSync(require.resolve('select2/dist/js/select2.full.min.js')),
     '/assets/bootstrap-adapter.js': [
         "window.__ = message => message;",
         "window._n = (one, many, n) => n === 1 ? one : many;",
@@ -39,12 +33,7 @@ const assets = {
         "window.bootstrap = {",
         "Toast: class { constructor(root) { this.root = root; } show() { this.root.classList.add('show'); } hide() { this.root.classList.remove('show'); } },",
         "Modal: class { constructor(root) { this.root = root; } show() { this.root.classList.add('show'); } hide() { this.root.classList.remove('show'); } }",
-        "};",
-        tracking ? tracking[0] : [
-            "window.glpiUnsavedFormChanges = false;",
-            "$(document).on('input change', 'form[data-track-changes=true] :input', () => { window.glpiUnsavedFormChanges = true; });"
-        ].join('\n'),
-        "$('#dropdown_status_main').select2();"
+        "};"
     ].join('\n'),
 };
 const server = http.createServer(async (req, res) => {
@@ -83,8 +72,7 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-        const html = backend('page', {readonly: url.pathname === '/readonly'});
-        res.end(html.replace('<script src="/assets/bootstrap-adapter.js">', '<script src="/assets/select2.js"></script><script src="/assets/bootstrap-adapter.js">'));
+        res.end(backend('page'));
     } catch (error) {
         res.writeHead(500, {'Content-Type': 'text/plain'});
         res.end(String(error));
@@ -108,18 +96,17 @@ const server = http.createServer(async (req, res) => {
         const counter = (surface, type, id) => surface.locator('[id^="actualtime_timer_' + type + '_' + id + '_"]').first();
         await page.goto(url);
         await page.waitForFunction(() => window.actualTime && document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.disabled === false);
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '4');
+        await page.evaluate(() => {
+            window.timerEvents = [];
+            window.addEventListener('actualtime:timer-changed', event => window.timerEvents.push(event.detail));
+        });
         await page.evaluate(() => {
             window.actualTime.pressedButton(1, 'TicketTask', 'start');
             window.actualTime.pressedButton(1, 'TicketTask', 'start');
         });
         await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'pause');
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '2', 'Start immediately shows the saved ticket status');
-        assert.match(await page.locator('#select2-dropdown_status_main-container').innerText(), /Processing/);
-        assert.equal(await page.evaluate(() => window.glpiUnsavedFormChanges), false, 'Automatic status update does not mark the form dirty');
-        await page.locator('#ticket-subject').fill('Unsaved subject');
-        await page.locator('#ticket-draft').fill('Unsaved description');
         assert.equal(calls.filter(call => call.action === 'start' && call.itemtype === 'TicketTask' && call.task_id === '1').length, 1, 'Double click sends one start for the task');
+        assert.deepEqual(await page.evaluate(() => window.timerEvents[0]), {action: 'start', task_id: 1, itemtype: 'TicketTask', parent_id: 1, parent_type: 'Ticket'}, 'Generic timer event identifies the changed item without ticket-status data');
         await toggle(page, 'TicketTask', 2).click();
         await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_2_1_"]')?.getAttribute('action') === 'pause');
         await toggle(page, 'ProjectTask', 1).click();
@@ -135,20 +122,15 @@ const server = http.createServer(async (req, res) => {
         await held;
         await toggle(page, 'TicketTask', 1).click();
         await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'start');
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '4', 'Pause immediately shows Pending without a page reload');
-        assert.match(await page.locator('#select2-dropdown_status_main-container').innerText(), /Pending/);
-        assert.equal(await page.locator('#ticket-subject').inputValue(), 'Unsaved subject');
-        assert.equal(await page.locator('#ticket-draft').inputValue(), 'Unsaved description');
-        assert.equal(await page.evaluate(() => window.glpiUnsavedFormChanges), true, 'Existing unsaved edits remain tracked');
         const frozenA = await counter(page, 'TicketTask', 1).innerText();
         heldFooter.res.writeHead(200, {'Content-Type': 'application/json'});
         heldFooter.res.end(JSON.stringify(heldFooter.result));
         heldFooter = null;
         await page.waitForFunction(() => document.querySelectorAll('#toast_body a').length === 2);
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '4', 'Stale snapshots cannot restore the old ticket status');
         const beforeB = await counter(page, 'TicketTask', 2).innerText();
         await page.waitForFunction(value => document.querySelector('[id^="actualtime_timer_TicketTask_2_"]')?.textContent !== value, beforeB);
         assert.equal(await counter(page, 'TicketTask', 1).innerText(), frozenA, 'Stale footer cannot restart a paused counter');
+        assert.equal(await page.evaluate(() => window.timerEvents.some(event => event.action === 'pause' && event.task_id === 1)), true);
         assert.equal(await toggle(page, 'ProjectTask', 1).getAttribute('action'), 'pause', 'Equal-ID project remains active');
 
         await page.locator('#toast_body a').filter({hasText: 'Ticket #2 / Task #2'}).click();
@@ -161,10 +143,10 @@ const server = http.createServer(async (req, res) => {
         assert.equal(await page.locator('#unrelated select').inputValue(), '9');
         assert.equal(await page.locator('#unrelated select').getAttribute('data-track-changes'), 'keep');
         assert.equal(await toggle(page, 'ProjectTask', 1).getAttribute('action'), 'pause');
+        assert.equal(await page.evaluate(() => window.timerEvents.some(event => event.action === 'stop' && event.task_id === 2 && event.parent_id === 2)), true);
 
         await toggle(page, 'TicketTask', 1).click();
         await page.waitForFunction(() => document.querySelectorAll('#toast_body a').length === 2);
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '2', 'Resume shows Processing immediately');
         const other = await context.newPage();
         other.on('pageerror', error => errors.push(error.message));
         await other.goto(url);
@@ -172,9 +154,7 @@ const server = http.createServer(async (req, res) => {
         await toggle(other, 'TicketTask', 1).click();
         await other.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'start');
         await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'start');
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '4', 'Other-tab pause synchronizes the displayed parent status');
         assert.equal(await toggle(page, 'ProjectTask', 1).getAttribute('action'), 'pause', 'Other tab pauses only the selected timer');
-        await page.evaluate(() => { window.glpiUnsavedFormChanges = false; });
         await page.reload();
         await page.waitForFunction(() => document.querySelectorAll('#toast_body a').length === 1);
         assert.match(await page.locator('#toast_body a').innerText(), /Project #1 \/ Task #1/);
@@ -187,25 +167,8 @@ const server = http.createServer(async (req, res) => {
         const dump = backend('dump');
         assert.equal(dump.timers.filter(timer => timer.actual_end === null).length, 1);
         assert.equal(dump.timers.find(timer => timer.itemtype === 'ProjectTask').actual_end, null);
-
-        const readonly = await context.newPage();
-        readonly.on('pageerror', error => errors.push(error.message));
-        await readonly.goto(url + '/readonly');
-        await readonly.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.disabled === false);
-        await toggle(readonly, 'TicketTask', 1).click();
-        await readonly.waitForFunction(() => document.querySelector('[data-actualtime-parent-status]')?.textContent.includes('Processing'));
-        await toggle(readonly, 'TicketTask', 1).click();
-        await readonly.waitForFunction(() => document.querySelector('[data-actualtime-parent-status]')?.textContent.includes('Pending'));
-        assert.equal(await readonly.locator('#reopen-link').count(), 1, 'Read-only status retains GLPI controls');
-        assert.equal(await readonly.locator('[data-actualtime-parent-status]').count(), 1, 'Read-only status updates in place');
-        await readonly.close();
-
-        await page.locator('#dropdown_status_main').selectOption('3');
-        await toggle(page, 'TicketTask', 1).click();
-        await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'pause');
-        assert.equal(await page.locator('#dropdown_status_main').inputValue(), '3', 'A manually selected unsaved status is preserved');
         assert.deepEqual(errors, []);
-        console.log('OK: immediate ticket status/Select2, read-only status, preserved drafts/manual status, stale snapshots, cross-tab pause and simultaneous counters.');
+        console.log('OK: simultaneous counters, same-ID task types, scoped end/modal, stale snapshots, reload, cross-tab pause and popup-disabled counting.');
     } finally {
         if (heldFooter) heldFooter.res.end(JSON.stringify(heldFooter.result));
         if (browser) await browser.close();

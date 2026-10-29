@@ -60,24 +60,11 @@ function renderRuntimeTask($type, $id): void {
 
 if (($argv[1] ?? '') === '--fixture') {
     concurrentFixture();
-    CommonDBTM::$records[Ticket::class][1]['status'] = 4;
     $mode = $argv[2] ?? 'footer';
     $input = json_decode($argv[3] ?? '{}', true);
     if (!empty($argv[4])) {
         [$DB, CommonDBTM::$records, Log::$entries] = unserialize(base64_decode($argv[4]), ['allowed_classes' => [MemoryDB::class]]);
     }
-    // Browser adapter for the AutoStatus hook; timer-events.php also exercises
-    // the real AutoStatus implementation separately.
-    Plugin::$listener = static function ($name, $event) use (&$DB) {
-        if ($name !== 'actualtime_timer_state_changed' || $event['itemtype'] !== TicketTask::class) { return; }
-        $ticket = CommonDBTM::$records[TicketTask::class][$event['items_id']]['tickets_id'];
-        if ($event['action'] === 'start') { CommonDBTM::$records[Ticket::class][$ticket]['status'] = 2; return; }
-        foreach ($DB->timers as $timer) {
-            if ($timer['itemtype'] === TicketTask::class && $timer['actual_begin'] !== null && $timer['actual_end'] === null
-                && CommonDBTM::$records[TicketTask::class][$timer['items_id']]['tickets_id'] === $ticket) { return; }
-        }
-        CommonDBTM::$records[Ticket::class][$ticket]['status'] = 4;
-    };
     switch ($mode) {
         case 'action':
             $method = ['start' => 'startTimer', 'pause' => 'pauseTimer', 'end' => 'stopTimer'][$input['action']];
@@ -94,20 +81,6 @@ if (($argv[1] ?? '') === '--fixture') {
         case 'page':
             ob_start();
             echo '<!doctype html><html><head><meta charset="utf-8"><script src="/assets/jquery.js"></script></head><body>';
-            $status = CommonDBTM::$records[Ticket::class][1]['status'];
-            echo '<form id="itil-form" action="/front/ticket.form.php?id=1" data-track-changes="true"><input type="hidden" name="id" value="1">';
-            echo '<div id="heading-main-item"><span class="status-recall"><i class="itilstatus status-' . $status . '"></i></span></div>';
-            echo '<div class="form-field"><label for="status_1">Status</label><div class="field-container">';
-            if (!empty($input['readonly'])) {
-                echo '<i class="itilstatus status-' . $status . '"></i>' . Ticket::getStatus($status) . '<a id="reopen-link" href="#reopen">Reopen</a>';
-            } else {
-                echo '<select id="dropdown_status_main" name="status">';
-                foreach (Ticket::getAllowedStatusArray($status) as $value => $label) {
-                    echo '<option value="' . $value . '"' . ($value === $status ? ' selected' : '') . '>' . $label . '</option>';
-                }
-                echo '</select>';
-            }
-            echo '</div></div><input id="ticket-subject" name="name" value="Original subject"><textarea id="ticket-draft" name="content"></textarea></form>';
             foreach ([[TicketTask::class, 1], [TicketTask::class, 2], [ProjectTask::class, 1]] as [$type, $id]) {
                 renderRuntimeTask($type, $id);
             }
