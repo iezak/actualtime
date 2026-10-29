@@ -87,6 +87,7 @@ if ($autostatus) {
         public static function getConfigurationValues($context) { return self::$values; }
         public static function setConfigurationValues($context, $values) { self::$values = array_merge(self::$values, $values); }
     }
+    class ITILFollowup extends CommonDBTM {}
     class AutoStatusMemoryDB extends MemoryDB {
         public function request($query) {
             if (!isset($query['INNER JOIN']['glpi_tickettasks'])) { return parent::request($query); }
@@ -179,6 +180,16 @@ if ($autostatus) {
     $DB->failCommit = true;
     nativeAction('start');
     check(ticketStatus() === 4 && $DB->timers === [], 'Failed commit changes neither timers nor ticket status');
+    foreach ([2, 4] as $status) {
+        integrationFixture(['followup_split_by_author' => 0, 'onfollowup_status' => $status]);
+        CommonDBTM::$records[TicketTask::class] = [];
+        $followup = new ITILFollowup();
+        $followup->fields = ['itemtype' => 'Ticket', 'items_id' => 1, 'is_private' => 0, 'users_id' => 42];
+        plugin_autostatus_item_add_followup($followup);
+        $snapshot = PluginActualtimeRuntime::footerData([], 1);
+        check(ticketStatus() === $status && $snapshot['ticket']['parent_status']['value'] === $status,
+            'Snapshot returns the real AutoStatus followup status without any task: ' . $status);
+    }
     echo "OK: real ActualTime + AutoStatus integration (GLPI adapters, no live database).\n";
 }
 echo "OK: $checks timer event checks.\n";

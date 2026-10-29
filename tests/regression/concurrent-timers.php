@@ -84,7 +84,23 @@ if (($argv[1] ?? '') === '--fixture') {
             $response = PluginActualtimeTask::$method($input['task_id'], $input['itemtype'], PluginActualtimeTask::WEB);
             break;
         case 'footer':
-            $response = PluginActualtimeRuntime::footerData($input['watch'] ?? []);
+            $response = PluginActualtimeRuntime::footerData($input['watch'] ?? [], $input['ticket_id'] ?? null);
+            break;
+        case 'timeline':
+            if (($input['action'] ?? '') === 'viewsubitem') { $response = '<div>Task editor</div>'; break; }
+            $task = new TicketTask();
+            $task->getFromDB((int)$input['tasks_id']);
+            $next = (int)$task->fields['state'] === 2 ? 1 : 2;
+            $task->input = ['id' => $task->getID(), 'state' => $next];
+            PluginActualtimeTask::preUpdate($task);
+            $task->update($task->input);
+            $response = ['state' => $next, 'label' => $next === 2 ? 'Done' : 'To do'];
+            break;
+        case 'followup':
+            // The real AutoStatus followup handler is covered by timer-events.php.
+            $ticket = (int)($input['items_id'] ?? 1);
+            CommonDBTM::$records[Ticket::class][$ticket]['status'] = !empty($input['requester']) ? 2 : 4;
+            $response = ['ok' => true];
             break;
         case 'form':
             ob_start();
@@ -92,6 +108,10 @@ if (($argv[1] ?? '') === '--fixture') {
             $response = ob_get_clean();
             break;
         case 'page':
+            if (!empty($input['no_tasks'])) {
+                CommonDBTM::$records[TicketTask::class] = [];
+                $DB->timers = [];
+            }
             ob_start();
             echo '<!doctype html><html><head><meta charset="utf-8"><script src="/assets/jquery.js"></script></head><body>';
             $status = CommonDBTM::$records[Ticket::class][1]['status'];
@@ -108,9 +128,12 @@ if (($argv[1] ?? '') === '--fixture') {
                 echo '</select>';
             }
             echo '</div></div><input id="ticket-subject" name="name" value="Original subject"><textarea id="ticket-draft" name="content"></textarea></form>';
-            foreach ([[TicketTask::class, 1], [TicketTask::class, 2], [ProjectTask::class, 1]] as [$type, $id]) {
-                renderRuntimeTask($type, $id);
+            if (empty($input['no_tasks'])) {
+                foreach ([[TicketTask::class, 1], [TicketTask::class, 2], [ProjectTask::class, 1]] as [$type, $id]) {
+                    renderRuntimeTask($type, $id);
+                }
             }
+            echo '<button type="button" class="close-edit-content">Close editor</button>';
             echo '<form id="unrelated"><select name="state" data-track-changes="keep"><option value="9">9</option></select></form>';
             echo '<script src="/assets/bootstrap-adapter.js"></script><script src="/assets/runtime.js"></script></body></html>';
             $response = ob_get_clean();
@@ -119,7 +142,8 @@ if (($argv[1] ?? '') === '--fixture') {
             $response = ['timers' => $DB->timers, 'records' => CommonDBTM::$records];
             break;
         case 'config':
-            CommonDBTM::$records[PluginActualtimeConfig::class][1]['showtimerpopup'] = (int)$input['show_popup'];
+            if (isset($input['show_popup'])) { CommonDBTM::$records[PluginActualtimeConfig::class][1]['showtimerpopup'] = (int)$input['show_popup']; }
+            if (isset($input['ticket_status'])) { CommonDBTM::$records[Ticket::class][1]['status'] = (int)$input['ticket_status']; }
             $response = true;
             break;
         default:
@@ -253,4 +277,22 @@ renderRuntimeTask(ProjectTask::class, 1);
 $html = ob_get_clean();
 check(str_contains($html, 'actualtime_timer_TicketTask_1_') && str_contains($html, 'actualtime_timer_ProjectTask_1_'), 'PHP renders type-scoped counter IDs');
 check(str_contains($html, 'data-actualtime-task=') && str_contains($html, 'fillCurrentTime(1, "ProjectTask",'), 'Dynamic forms expose exact watch target and typed counter calls');
+concurrentFixture();
+CommonDBTM::$records[TicketTask::class] = [];
+CommonDBTM::$records[Ticket::class][1]['status'] = 4;
+$footer = PluginActualtimeRuntime::footerData([], 1);
+check($footer['ticket']['parent_status']['value'] === 4 && $footer['active'] === [] && $footer['states'] === [], 'Ticket status is returned without tasks or running timers');
+CommonDBTM::$deniedUpdate = ['Ticket:1'];
+check(PluginActualtimeRuntime::footerData([], 1)['ticket']['parent_id'] === 1, 'Reading status requires only ticket read access');
+CommonDBTM::$denied = ['Ticket:1'];
+check(!isset(PluginActualtimeRuntime::footerData([], 1)['ticket']), 'Inaccessible ticket status is omitted');
+CommonDBTM::$denied = [];
+CommonDBTM::$records[Ticket::class][1]['is_deleted'] = 1;
+check(!isset(PluginActualtimeRuntime::footerData([], 1)['ticket']), 'Deleted ticket status is omitted');
+foreach ([0, -1, 'invalid', '1 OR 1=1', []] as $invalid) {
+    check(!isset(PluginActualtimeRuntime::footerData([], $invalid)['ticket']), 'Malformed ticket ID exposes no status');
+}
+CommonDBTM::$records[Ticket::class][1]['is_deleted'] = 0;
+Session::$user = 0;
+check(!isset(PluginActualtimeRuntime::footerData([], 1)['ticket']), 'Logged-out status lookup is rejected');
 echo "OK: $checks regression checks (creation and simultaneous task controls; no real database).\n";

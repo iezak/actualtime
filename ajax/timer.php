@@ -70,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['footer'])) {
     header("Content-Type: application/json; charset=UTF-8");
     $raw = $_GET['watch'] ?? '';
     $watch = is_string($raw) && strlen($raw) <= 16384 ? json_decode($raw, true) : [];
-    echo json_encode(PluginActualtimeRuntime::footerData(is_array($watch) ? $watch : []));
+    echo json_encode(PluginActualtimeRuntime::footerData(is_array($watch) ? $watch : [], $_GET['ticket_id'] ?? null));
     exit;
 }
 
@@ -92,3 +92,4 @@ echo "<a class='btn btn-outline-secondary' href='" . htmlspecialchars($parent->g
 echo "<i class='ti ti-eye'></i><span>" . __s("View this item in its context") . "</span></a></div><hr>";
 $item->showForm((int)$task_id, ['parent' => $parent]);
 echo "</div>";
+

@@ -47,6 +47,35 @@ class PluginActualtimeRuntime
                 : $task->canUpdateItem());
     }
 
+    private static function statusFields(Ticket $ticket): array
+    {
+        $status = (int)$ticket->fields['status'];
+        return [
+            'value' => $status,
+            'label' => $ticket::getStatus($status),
+            'icon' => $ticket::getStatusClass($status),
+            'options' => $ticket::getAllowedStatusArray($status),
+        ];
+    }
+
+    /** Read the open ticket independently of task access or running timers. */
+    public static function ticketState($tickets_id): array
+    {
+        if (!Session::getLoginUserID()
+            || filter_var($tickets_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            throw new InvalidArgumentException(__('Invalid timer task.', 'actualtime'));
+        }
+        $ticket = new Ticket();
+        if (!$ticket->can((int)$tickets_id, READ) || !empty($ticket->fields['is_deleted'])) {
+            throw new RuntimeException(__('You do not have permission to control this timer.', 'actualtime'));
+        }
+        return [
+            'parent_id' => (int)$ticket->getID(),
+            'parent_type' => Ticket::class,
+            'parent_status' => self::statusFields($ticket),
+        ];
+    }
+
     /** Each response identifies the selected task and its actual parent. */
     public static function taskState($itemtype, $items_id): array
     {
@@ -75,13 +104,7 @@ class PluginActualtimeRuntime
             'task_time' => (int)($task->fields['actiontime'] ?? $task->fields['effective_duration'] ?? 0),
         ];
         if ($parent instanceof Ticket) {
-            $status = (int)$parent->fields['status'];
-            $state['parent_status'] = [
-                'value' => $status,
-                'label' => $parent::getStatus($status),
-                'icon' => $parent::getStatusClass($status),
-                'options' => $parent::getAllowedStatusArray($status),
-            ];
+            $state['parent_status'] = self::statusFields($parent);
         }
         return $state;
     }
@@ -111,7 +134,7 @@ class PluginActualtimeRuntime
     }
 
     /** Read-only snapshots also reconcile timers changed in another tab. */
-    public static function footerData(array $watch = []): array
+    public static function footerData(array $watch = [], $tickets_id = null): array
     {
         $out = ['rand' => mt_rand(), 'show_popup' => (new PluginActualtimeConfig())->showTimerPopup()];
         foreach (['d' => ['day', 'days'], 'h' => ['hour', 'hours'], 'min' => ['minute', 'minutes'], 's' => ['second', 'seconds']] as $short => [$single, $plural]) {
@@ -143,6 +166,13 @@ class PluginActualtimeRuntime
             }
         }
         $out['states'] = array_values($states);
+        if ($tickets_id !== null) {
+            try {
+                $out['ticket'] = self::ticketState($tickets_id);
+            } catch (InvalidArgumentException | RuntimeException $error) {
+                // Invalid, deleted and inaccessible tickets expose no status.
+            }
+        }
         return $out;
     }
 }

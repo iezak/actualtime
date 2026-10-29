@@ -1,6 +1,6 @@
 # ActualTime London — ajuste de períodos anteriores
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.3**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.4**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
 
@@ -157,6 +157,32 @@ ACTUALTIME_STATUS_GLPI_CORE=/caminho/glpi node tests/regression/concurrent.brows
 Os cenários incluem início/pausa/retomada sem recarregar, seletor e status de leitura,
 preservação de rascunhos e de escolhas manuais, respostas atrasadas, outra aba e
 cronômetros simultâneos. No espelho, confira o painel do chamado após cada ação.
+
+### Tarefas e acompanhamentos, sem F5
+
+A versão **3.2.6-london.4** também sincroniza o painel após concluir/reabrir uma
+tarefa pelo controle do GLPI, abrir/fechar seu editor e salvar tarefas ou
+acompanhamentos. O navegador consulta o **status efetivamente salvo** depois da
+resposta dessas ações. As regras configuradas no AutoStatus continuam determinando
+esse valor; abrir um editor ou reabrir uma tarefa não inicia um cronômetro.
+
+A consulta agora identifica o chamado aberto independentemente dos cronômetros.
+Assim, um acompanhamento atualiza o painel mesmo quando não existe nenhuma tarefa
+ou cronômetro ativo. A leitura exige acesso ao chamado e omite dados de chamados
+inexistentes, na lixeira ou sem permissão. A resposta não contém conteúdo de tarefas
+ou acompanhamentos.
+
+As atualizações continuam preservando rascunhos, escolhas manuais de status e as
+opções permitidas pelo perfil. Respostas anteriores à ação são descartadas. Ações
+de outro chamado e requisições que falharam não disparam essa sincronização.
+O endpoint de consulta aceita o parâmetro opcional `ticket_id`; clientes antigos
+que não o enviam continuam recebendo os dados dos cronômetros normalmente.
+
+Os testes de navegador incluem conclusão e reabertura nativas, abertura/fechamento
+do editor, acompanhamentos em chamado sem tarefas, erros de permissão, outro chamado,
+instalação em subdiretório e resposta atrasada. O teste PHP também executa o handler
+real de acompanhamentos do AutoStatus e verifica o status retornado sem tarefas.
+Este ajuste exige atualizar somente o **ActualTime**, mantendo o AutoStatus 1.4.0.
 
 ## Funcionalidades já validadas
 

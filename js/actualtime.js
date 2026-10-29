@@ -122,6 +122,37 @@ window.actualTime = new function() {
          }
       });
    }
+   function currentTicket() {
+      const form = $('#itil-form');
+      const action = (form.attr('action') || '').split('?')[0].toLowerCase();
+      if (!action.endsWith('/ticket.form.php') && !action.endsWith('/tracking.injector.php')) return 0;
+      const id = Number(form.children("input[name='id']").first().val());
+      return Number.isSafeInteger(id) && id > 0 ? id : 0;
+   }
+   function timelineRequest(settings) {
+      const ticket = currentTicket();
+      if (!ticket) return false;
+      const url = new URL(settings.url, window.location.href);
+      if (url.origin !== window.location.origin) return false;
+      const root = (CFG_GLPI.root_doc || '').replace(/\/$/, '');
+      const path = url.pathname;
+      const method = (settings.type || settings.method || 'GET').toUpperCase();
+      const data = typeof settings.data === 'string' ? new URLSearchParams(settings.data) : settings.data;
+      const field = name => {
+         const value = data && typeof data.get === 'function' ? data.get(name) : data && data[name];
+         return value === undefined || value === null ? url.searchParams.get(name) : value;
+      };
+      const parent = field('parenttype') || field('itemtype');
+      const parentId = field('tickets_id') || (parent === 'Ticket' ? field('items_id') : null);
+      if ((parent && parent !== 'Ticket') || (parentId !== null && Number(parentId) !== ticket)) return false;
+      if (path === root + '/ajax/timeline.php') {
+         return (method === 'POST' && field('action') === 'change_task_state')
+            || (field('action') === 'viewsubitem' && ['TicketTask', 'ITILFollowup'].includes(field('type')));
+      }
+      return method === 'POST' && [
+         '/front/tickettask.form.php', '/front/commonitiltask.form.php', '/front/itilfollowup.form.php'
+      ].some(endpoint => path === root + endpoint);
+   }
    function applyState(state, force) {
       const id = key(state.task_id, state.itemtype);
       if (!id || (!force && pending.has(id))) return;
@@ -282,11 +313,20 @@ window.actualTime = new function() {
             self.refresh();
          });
    };
+   this.refreshTimeline = function() {
+      if (!currentTicket()) return;
+      ++generation;
+      $('[data-actualtime-task]').each(function() {
+         newTargets.add($(this).attr('data-actualtime-task'));
+      });
+      self.refresh();
+   };
    this.refresh = function() {
       if (!self.ajax_url) return;
       if (syncing) { syncQueued = true; return; }
       syncing = true;
       const atGeneration = generation;
+      const ticket = currentTicket();
       const watch = new Set(counters.keys());
       $('[data-actualtime-task]').each(function() {
          if (!discovered.has(this)) {
@@ -295,9 +335,11 @@ window.actualTime = new function() {
          }
       });
       newTargets.forEach(id => watch.add(id));
-      $.ajax({type: 'GET', url: self.ajax_url, dataType: 'json', cache: false, data: {footer: 1, watch: JSON.stringify(Array.from(watch).slice(0, 100))}})
+      const data = {footer: 1, watch: JSON.stringify(Array.from(watch).slice(0, 100))};
+      if (ticket) data.ticket_id = ticket;
+      $.ajax({type: 'GET', url: self.ajax_url, dataType: 'json', cache: false, data})
          .done(snapshot => {
-            if (atGeneration !== generation) { syncQueued = true; return; }
+            if (atGeneration !== generation || ticket !== currentTicket()) { syncQueued = true; return; }
             if (!Array.isArray(snapshot.states) || !Array.isArray(snapshot.active)) return;
             watch.forEach(id => newTargets.delete(id));
             Object.keys(labels).forEach(name => { if (typeof snapshot[name] === 'string') labels[name] = snapshot[name]; });
@@ -315,6 +357,7 @@ window.actualTime = new function() {
                   elements(entry.task, entry.type, 'button').prop('disabled', true);
                }
             });
+            if (snapshot.ticket) updateParentStatus(snapshot.ticket);
             renderPopup();
          })
          .always(() => {
@@ -329,6 +372,15 @@ window.actualTime = new function() {
          $(document).on('change.actualtimeParentStatus', "#itil-form select[name='status']", function() {
             editedStatuses.add(this);
          });
+         $(document).on('ajaxSuccess.actualtimeTimeline', function(event, xhr, settings) {
+            if (!timelineRequest(settings)) return;
+            self.refreshTimeline();
+            if ((settings.type || settings.method || 'GET').toUpperCase() === 'POST') {
+               try { localStorage.setItem('actualtime:changed', String(Date.now())); } catch (error) { /* polling still reconciles tabs */ }
+            }
+         });
+         $(document).on('click.actualtimeTimeline', '.close-edit-content', () => self.refreshTimeline());
+         $(document).on('shown.bs.modal.actualtimeTimeline hidden.bs.modal.actualtimeTimeline', '#modal_actualtime', () => self.refreshTimeline());
          $('body').append("<div class='toast-container bottom-0 start-0 p-3 messages_after_redirect' id='toast_actualtime'><div class='toast border-0' role='status' aria-live='polite'><div class='toast-header bg-info text-white'><strong class='me-auto'>" + _n('Information', 'Informations', 1) + "</strong><button type='button' class='btn-close' data-bs-dismiss='toast' aria-label='" + __('Close') + "'></button></div><div id='toast_body' class='toast-body'></div></div></div>");
          toast = new bootstrap.Toast(document.querySelector('#toast_actualtime .toast'), {autohide: false});
          $('#toast_actualtime button[data-bs-dismiss]').on('click', () => { popupDismissed = true; });

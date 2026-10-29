@@ -22,6 +22,7 @@ const calls = [];
 let holdNextFooter = false;
 let heldFooter;
 let onHeld;
+let footerCalls = 0;
 function backend(mode, data = {}) {
     const result = JSON.parse(execFileSync(php, [fixture, '--fixture', mode, JSON.stringify(data), state], {encoding: 'utf8'}));
     state = result.state;
@@ -55,6 +56,16 @@ const server = http.createServer(async (req, res) => {
             res.end(assets[url.pathname]);
             return;
         }
+        if (url.pathname.endsWith('/ajax/timeline.php') || url.pathname.endsWith('/front/itilfollowup.form.php') || url.pathname.endsWith('/front/tickettask.form.php')) {
+            let body = '';
+            for await (const chunk of req) body += chunk;
+            const input = {...Object.fromEntries(url.searchParams), ...Object.fromEntries(new URLSearchParams(body))};
+            if (input.fail === '1') { res.writeHead(403); res.end('Denied'); return; }
+            const result = backend(url.pathname.endsWith('itilfollowup.form.php') ? 'followup' : 'timeline', input);
+            res.writeHead(200, {'Content-Type': typeof result === 'string' ? 'text/html' : 'application/json'});
+            res.end(typeof result === 'string' ? result : JSON.stringify(result));
+            return;
+        }
         if (url.pathname.endsWith('/ajax/timer.php')) {
             let result;
             if (req.method === 'POST') {
@@ -70,7 +81,8 @@ const server = http.createServer(async (req, res) => {
                 res.end(backend('form', input));
                 return;
             } else {
-                result = backend('footer', {watch: JSON.parse(url.searchParams.get('watch') || '[]')});
+                ++footerCalls;
+                result = backend('footer', {watch: JSON.parse(url.searchParams.get('watch') || '[]'), ticket_id: url.searchParams.get('ticket_id')});
                 if (holdNextFooter) {
                     holdNextFooter = false;
                     heldFooter = {res, result};
@@ -83,7 +95,7 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
-        const html = backend('page', {readonly: url.pathname === '/readonly'});
+        const html = backend('page', {readonly: url.pathname === '/readonly', no_tasks: url.pathname === '/no-tasks'});
         res.end(html.replace('<script src="/assets/bootstrap-adapter.js">', '<script src="/assets/select2.js"></script><script src="/assets/bootstrap-adapter.js">'));
     } catch (error) {
         res.writeHead(500, {'Content-Type': 'text/plain'});
@@ -204,8 +216,69 @@ const server = http.createServer(async (req, res) => {
         await toggle(page, 'TicketTask', 1).click();
         await page.waitForFunction(() => document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.getAttribute('action') === 'pause');
         assert.equal(await page.locator('#dropdown_status_main').inputValue(), '3', 'A manually selected unsaved status is preserved');
+
+        await context.close();
+        state = '';
+        const timelineContext = await browser.newContext();
+        const timeline = await timelineContext.newPage();
+        timeline.on('pageerror', error => errors.push(error.message));
+        await timeline.goto(url);
+        await timeline.waitForFunction(() => window.actualTime && document.querySelector('[id^="actualtime_button_TicketTask_1_1_"]')?.disabled === false);
+        await toggle(timeline, 'TicketTask', 1).click();
+        await timeline.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '2');
+        await timeline.locator('#ticket-draft').fill('Keep this draft after task changes');
+
+        const stale = new Promise(resolve => { onHeld = resolve; });
+        holdNextFooter = true;
+        await timeline.evaluate(() => window.actualTime.refresh());
+        await stale;
+        await timeline.evaluate(() => $.post('/ajax/timeline.php', {action: 'change_task_state', parenttype: 'Ticket', tickets_id: 1, tasks_id: 1}));
+        heldFooter.res.writeHead(200, {'Content-Type': 'application/json'});
+        heldFooter.res.end(JSON.stringify(heldFooter.result));
+        heldFooter = null;
+        await timeline.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '4');
+        assert.match(await timeline.locator('#select2-dropdown_status_main-container').innerText(), /Pending/, 'Core task completion refreshes Select2 despite a delayed old footer');
+        assert.equal(await timeline.locator('#ticket-draft').inputValue(), 'Keep this draft after task changes');
+
+        backend('config', {ticket_status: 2});
+        await timeline.evaluate(() => $.post('/ajax/timeline.php', {action: 'change_task_state', parenttype: 'Ticket', tickets_id: 1, tasks_id: 1}));
+        await timeline.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '2');
+        assert.equal(backend('dump').records.TicketTask[1].state, 1, 'Core reopen is reflected without starting a timer');
+
+        backend('config', {ticket_status: 3});
+        await timeline.evaluate(() => $.post('/ajax/timeline.php', {action: 'viewsubitem', type: 'TicketTask', parenttype: 'Ticket', tickets_id: 1, id: 1}));
+        await timeline.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '3');
+        backend('config', {ticket_status: 4});
+        await timeline.locator('.close-edit-content').click();
+        await timeline.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '4');
+
+        await timeline.close();
+        state = '';
+        const noTasks = await timelineContext.newPage();
+        noTasks.on('pageerror', error => errors.push(error.message));
+        await noTasks.goto(url + '/no-tasks');
+        await noTasks.waitForFunction(() => window.actualTime && document.querySelector('#dropdown_status_main')?.value === '4');
+        assert.equal(await noTasks.locator('[data-actualtime-task]').count(), 0, 'Followup fixture has no tasks or running timers');
+        await noTasks.locator('#ticket-draft').fill('Keep this followup draft');
+        await noTasks.evaluate(() => $.post('/front/itilfollowup.form.php', {add: 1, itemtype: 'Ticket', items_id: 1, requester: 1}));
+        await noTasks.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '2');
+        await noTasks.evaluate(() => $.post('/front/itilfollowup.form.php', {add: 1, itemtype: 'Ticket', items_id: 1}));
+        await noTasks.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '4');
+        assert.equal(await noTasks.locator('#ticket-draft').inputValue(), 'Keep this followup draft');
+
+        const beforeIgnored = footerCalls;
+        await noTasks.evaluate(async () => {
+            await $.post('/front/itilfollowup.form.php', {add: 1, itemtype: 'Ticket', items_id: 2, requester: 1});
+            try { await $.post('/front/itilfollowup.form.php', {add: 1, itemtype: 'Ticket', items_id: 1, fail: 1}); } catch (error) { /* denied write */ }
+        });
+        assert.equal(footerCalls, beforeIgnored, 'Other ticket and failed operations do not trigger status refresh loops');
+        assert.equal(await noTasks.locator('#dropdown_status_main').inputValue(), '4');
+        await noTasks.evaluate(() => { CFG_GLPI.root_doc = '/glpi'; });
+        await noTasks.evaluate(() => $.post('/glpi/front/itilfollowup.form.php', {add: 1, itemtype: 'Ticket', items_id: 1, requester: 1}));
+        await noTasks.waitForFunction(() => document.querySelector('#dropdown_status_main')?.value === '2');
+        await timelineContext.close();
         assert.deepEqual(errors, []);
-        console.log('OK: immediate ticket status/Select2, read-only status, preserved drafts/manual status, stale snapshots, cross-tab pause and simultaneous counters.');
+        console.log('OK: core task completion/reopen, editor open/close, followups without timers/tasks, denied/other-ticket requests, subdirectory install, Select2, preserved drafts, stale snapshots and existing timer controls.');
     } finally {
         if (heldFooter) heldFooter.res.end(JSON.stringify(heldFooter.result));
         if (browser) await browser.close();
