@@ -1,9 +1,8 @@
 <?php
 
 /**
- * Native timer notifications and optional integration with the real AutoStatus.
+ * Native timer lifecycle notifications, independent of consumers.
  * php tests/regression/timer-events.php
- * AUTOSTATUS_PLUGIN_DIR=../autostatus php tests/regression/timer-events.php
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -69,116 +68,7 @@ Session::$user = 99;
 PluginActualtimeTask::pauseTimer(10, TicketTask::class, PluginActualtimeTask::AUTO);
 check(Plugin::$events[1]['data']['origin'] === PluginActualtimeTask::AUTO, 'Trusted automatic pause also notifies subscribers');
 eventFixture();
-Plugin::$listener = static function () { CommonDBTM::$records[Ticket::class][1]['status'] = 3; };
-$result = nativeAction('start');
-check($result['runtime']['parent_status']['value'] === 3, 'Action response reads the parent status after the integration hook');
-check($result['runtime']['parent_status']['label'] === 'Processing (planned)', 'Snapshot contains the server status label');
-check(isset($result['runtime']['parent_status']['options'][3]), 'Snapshot carries permitted dropdown choices for the new status');
-eventFixture();
 PluginActualtimeManualtimer::create(TicketTask::class, 10, '2025-01-10 08:00:00', '2025-01-10 08:30:00');
 check(Plugin::$events === [], 'Historical entries do not simulate a live timer event');
 
-$autostatus = getenv('AUTOSTATUS_PLUGIN_DIR');
-if ($autostatus) {
-    require rtrim($autostatus, '/') . '/hook.php';
-    require rtrim($autostatus, '/') . '/setup.php';
-    class Config {
-        public static $values = [];
-        public static function getConfigurationValues($context) { return self::$values; }
-        public static function setConfigurationValues($context, $values) { self::$values = array_merge(self::$values, $values); }
-    }
-    class AutoStatusMemoryDB extends MemoryDB {
-        public function request($query) {
-            if (!isset($query['INNER JOIN']['glpi_tickettasks'])) { return parent::request($query); }
-            check($query['INNER JOIN']['glpi_tickettasks']['ON'] === ['glpi_plugin_actualtime_tasks' => 'items_id', 'glpi_tickettasks' => 'id'], 'Timer query joins the task foreign key');
-            $matches = static function ($row, $conditions) use (&$matches) {
-                foreach ($conditions as $field => $value) {
-                    if ($field === 'NOT') { if ($matches($row, $value)) { return false; } }
-                    elseif (($row[$field] ?? null) !== $value) { return false; }
-                }
-                return true;
-            };
-            $rows = [];
-            foreach ($this->timers as $timer) {
-                $task = CommonDBTM::$records[TicketTask::class][$timer['items_id']] ?? null;
-                if ($task === null) { continue; }
-                $row = [];
-                foreach ($timer as $key => $value) { $row['glpi_plugin_actualtime_tasks.' . $key] = $value; }
-                foreach ($task as $key => $value) { $row['glpi_tickettasks.' . $key] = $value; }
-                if ($matches($row, $query['WHERE'])) { $rows[] = $row; }
-            }
-            return new ArrayIterator(array_slice($rows, 0, $query['LIMIT'] ?? count($rows)));
-        }
-    }
-    function integrationFixture(array $config = []): void {
-        global $DB, $PLUGIN_HOOKS;
-        eventFixture();
-        $DB = new AutoStatusMemoryDB();
-        Config::$values = $config + ['actualtime_enabled' => 1];
-        CommonDBTM::$records[Ticket::class][1]['status'] = 4;
-        CommonDBTM::$records[Ticket::class][2] = ['id' => 2, 'status' => 4, 'is_deleted' => 0];
-        CommonDBTM::$records[TicketTask::class][11] = CommonDBTM::$records[TicketTask::class][10];
-        CommonDBTM::$records[TicketTask::class][11]['id'] = 11;
-        CommonDBTM::$records[TicketTask::class][12] = CommonDBTM::$records[TicketTask::class][10];
-        CommonDBTM::$records[TicketTask::class][12]['id'] = 12;
-        CommonDBTM::$records[TicketTask::class][12]['tickets_id'] = 2;
-        plugin_init_autostatus();
-        Plugin::$listener = static function ($name, $data) use (&$PLUGIN_HOOKS) {
-            foreach ($PLUGIN_HOOKS[$name] ?? [] as $callback) { $callback($data); }
-        };
-    }
-    function ticketStatus(int $id = 1): int { return CommonDBTM::$records[Ticket::class][$id]['status']; }
-
-    integrationFixture();
-    $result = nativeAction('start');
-    check($result['type'] === 'info' && ticketStatus() === 2 && $result['runtime']['parent_status']['value'] === 2, 'Real ActualTime start returns the status saved by the real AutoStatus');
-    PluginActualtimeTask::startTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
-    nativeAction('pause');
-    check(ticketStatus() === 2, 'Pausing one of two tasks on the same ticket keeps it in progress');
-    $result = PluginActualtimeTask::pauseTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
-    check(ticketStatus() === 4 && $result['runtime']['parent_status']['value'] === 4, 'Pausing the last task immediately returns pending');
-    nativeAction('start');
-    check(ticketStatus() === 2, 'Resume restores in progress');
-    PluginActualtimeTask::startTimer(12, TicketTask::class, PluginActualtimeTask::WEB);
-    PluginActualtimeTask::startTimer(10, ProjectTask::class, PluginActualtimeTask::WEB);
-    nativeAction('stop');
-    check(ticketStatus() === 4 && ticketStatus(2) === 2, 'Another ticket and a same-ID project timer do not block the selected ticket pause status');
-    check(CommonDBTM::$records[TicketTask::class][10]['state'] === 2 && PluginActualtimeTask::checkTimerActive(12, TicketTask::class), 'Native completion and the other active timer are preserved');
-
-    integrationFixture();
-    nativeAction('start');
-    CommonDBTM::$records[TicketTask::class][11]['users_id_tech'] = 7;
-    Session::$user = 7;
-    PluginActualtimeTask::startTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
-    Session::$user = 42;
-    nativeAction('pause');
-    check(ticketStatus() === 2, 'Another technician on this ticket keeps it in progress');
-    Session::$user = 7;
-    PluginActualtimeTask::stopTimer(11, TicketTask::class, PluginActualtimeTask::WEB);
-    check(ticketStatus() === 4, 'Last technician completion applies pending');
-
-    foreach ([5, 6] as $status) {
-        integrationFixture();
-        nativeAction('start');
-        CommonDBTM::$records[Ticket::class][1]['status'] = $status;
-        nativeAction('pause');
-        check(ticketStatus() === $status, 'Closing a timer does not reopen solved/closed ticket ' . $status);
-    }
-    integrationFixture(['actualtime_enabled' => 0]);
-    nativeAction('start');
-    check(ticketStatus() === 4, 'Disabled integration leaves ticket status alone');
-    integrationFixture(['actualtime_allowed_statuses_start' => '1']);
-    nativeAction('start');
-    check(ticketStatus() === 4, 'Start filter is independent of task creation');
-    integrationFixture(['actualtime_status_running' => 3, 'actualtime_status_stopped' => 1]);
-    nativeAction('start');
-    check(ticketStatus() === 3, 'Custom running status applied');
-    nativeAction('pause');
-    check(ticketStatus() === 1, 'Custom stopped status applied');
-    integrationFixture();
-    $DB->failCommit = true;
-    nativeAction('start');
-    check(ticketStatus() === 4 && $DB->timers === [], 'Failed commit changes neither timers nor ticket status');
-    echo "OK: real ActualTime + AutoStatus integration (GLPI adapters, no live database).\n";
-}
 echo "OK: $checks timer event checks.\n";

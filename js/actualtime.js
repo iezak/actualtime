@@ -6,7 +6,6 @@ window.actualTime = new function() {
    const states = new Map();
    const pending = new Set();
    const discovered = new WeakSet();
-   const editedStatuses = new WeakSet();
    const newTargets = new Set();
    let active = [];
    let popupEnabled = false;
@@ -78,55 +77,10 @@ window.actualTime = new function() {
       scope.find('span.state.state_1').attr('title', labels.text_done).removeClass('state_1').addClass('state_2');
       if (result.task_time !== undefined && result.task_time !== null) scope.find('span.actiontime').text(self.timeToText(Number(result.task_time), 1));
    }
-   function updateParentStatus(state) {
-      const status = state.parent_status;
-      if (state.parent_type !== 'Ticket' || !status || !Number.isSafeInteger(status.value)
-         || status.value <= 0 || typeof status.label !== 'string' || typeof status.icon !== 'string') return;
-      $('#itil-form').filter(function() {
-         const form = $(this);
-         const action = (form.attr('action') || '').split('?')[0].toLowerCase();
-         return (action.endsWith('/ticket.form.php') || action.endsWith('/tracking.injector.php'))
-            && form.children("input[name='id']").filter(function() { return Number(this.value) === Number(state.parent_id); }).length;
-      }).each(function() {
-         const form = $(this);
-         const fields = form.find("select[name='status']");
-         fields.each(function() {
-            const field = $(this);
-            if (editedStatuses.has(this) || String(field.val()) === String(status.value)) return;
-            if (status.options && typeof status.options === 'object') {
-               field.empty();
-               Object.entries(status.options).forEach(([value, label]) => {
-                  if (/^[1-9][0-9]*$/.test(value) && typeof label === 'string') field.append(new Option(label, value));
-               });
-            }
-            if (!field.find('option').filter(function() { return Number(this.value) === status.value; }).length) {
-               field.append(new Option(status.label, String(status.value)));
-            }
-            // Refresh Select2 without simulating a user edit or opening dialogs.
-            field.val(String(status.value)).trigger('change.select2');
-         });
-         const icon = () => $('<i>', {class: status.icon + ' me-1', title: status.label, 'data-bs-toggle': 'tooltip'});
-         form.find('#heading-main-item .status-recall').empty().append(icon());
-         if (!fields.length) {
-            const container = form.find(".form-field > label[for^='status_']").closest('.form-field').children('.field-container').first();
-            if (!container.length) return;
-            let value = container.children('[data-actualtime-parent-status]');
-            if (!value.length) {
-               // Keep GLPI's reopen link and any other controls in this field.
-               container.contents().filter(function() {
-                  return this.nodeType === 3 || (this.nodeType === 1 && $(this).is('i.itilstatus'));
-               }).remove();
-               value = $('<span>', {'data-actualtime-parent-status': '1'}).prependTo(container);
-            }
-            value.empty().append(icon()).append(document.createTextNode(status.label));
-         }
-      });
-   }
    function applyState(state, force) {
       const id = key(state.task_id, state.itemtype);
       if (!id || (!force && pending.has(id))) return;
       states.set(id, state);
-      updateParentStatus(state);
       if (state.active) self.startCount(state.task_id, state.itemtype, state.time);
       else {
          self.endCount(state.task_id, state.itemtype);
@@ -272,6 +226,11 @@ window.actualTime = new function() {
                if (result.runtime.own_active) active.push(result.runtime);
                renderPopup();
                try { localStorage.setItem('actualtime:changed', String(Date.now())); } catch (error) { /* polling still reconciles tabs */ }
+               window.dispatchEvent(new CustomEvent('actualtime:timer-changed', {detail: {
+                  action: action === 'end' ? 'stop' : action,
+                  task_id: Number(task), itemtype: type,
+                  parent_id: Number(result.runtime.parent_id), parent_type: result.runtime.parent_type
+               }}));
             } else notify(result);
          })
          .fail(() => notify({type: 'warning', message: labels.text_error}))
@@ -326,9 +285,6 @@ window.actualTime = new function() {
       self.ajax_url = ajax_url;
       if (!initialized) {
          initialized = true;
-         $(document).on('change.actualtimeParentStatus', "#itil-form select[name='status']", function() {
-            editedStatuses.add(this);
-         });
          $('body').append("<div class='toast-container bottom-0 start-0 p-3 messages_after_redirect' id='toast_actualtime'><div class='toast border-0' role='status' aria-live='polite'><div class='toast-header bg-info text-white'><strong class='me-auto'>" + _n('Information', 'Informations', 1) + "</strong><button type='button' class='btn-close' data-bs-dismiss='toast' aria-label='" + __('Close') + "'></button></div><div id='toast_body' class='toast-body'></div></div></div>");
          toast = new bootstrap.Toast(document.querySelector('#toast_actualtime .toast'), {autohide: false});
          $('#toast_actualtime button[data-bs-dismiss]').on('click', () => { popupDismissed = true; });

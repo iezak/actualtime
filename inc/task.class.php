@@ -1367,8 +1367,7 @@ JAVASCRIPT;
             } catch (Throwable $error) {
                 Toolbox::logInFile('php-errors', 'ActualTime timer hook: ' . $error->getMessage() . "\n");
             }
-            // AutoStatus may have changed the parent. Read the displayed state
-            // after integrations run, instead of returning the pre-hook status.
+            // Return the final task state after lifecycle listeners have run.
             if ($origin !== self::AUTO) {
                 try {
                     $result['runtime'] = PluginActualtimeRuntime::taskState($itemtype, $task_id);

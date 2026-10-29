@@ -39,7 +39,7 @@ class Plugin
     public static $events = [];
     public static $listener = null;
     public function isActivated($name) { return $name === 'actualtime' && self::$active; }
-    public static function isPluginActive($name) { return in_array($name, ['actualtime', 'autostatus'], true) && self::$active; }
+    public static function isPluginActive($name) { return self::$active; }
     public static function getWebDir($name) { return '/plugins/' . $name; }
     public static function doHook($name, $data = null) {
         global $DB;
