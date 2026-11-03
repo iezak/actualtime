@@ -25,12 +25,12 @@ window.actualTime = new function() {
       symb_min: '%dmin', symb_minute: '%d minute', symb_minutes: '%d minutes',
       symb_s: '%ds', symb_second: '%d second', symb_seconds: '%d seconds',
       text_pause: 'Pause', text_start: 'Start', text_restart: 'Resume', text_stop: 'Stop', text_done: 'Done',
-      text_running: 'Running tasks (%d)', text_task: 'Task #%d',
+      text_running: 'Running timers (%d)', text_task: 'Task #%d',
       text_error: 'Could not update the timer. Refresh the task and try again.'
    };
 
    function key(task, type) {
-      return /^(TicketTask|ChangeTask|ProblemTask|ProjectTask)$/.test(type)
+      return /^(TicketTask|ChangeTask|ProblemTask|ProjectTask|PlanningExternalEvent)$/.test(type)
          && Number.isSafeInteger(Number(task)) && Number(task) > 0 ? type + ':' + Number(task) : '';
    }
    function elements(task, type, role) {
@@ -80,7 +80,9 @@ window.actualTime = new function() {
    function applyState(state, force) {
       const id = key(state.task_id, state.itemtype);
       if (!id || (!force && pending.has(id))) return;
+      const previous = states.get(id);
       states.set(id, state);
+      if (state.done && previous && !previous.done) updateCompletedForm(state.task_id, state.itemtype, state);
       if (state.active) self.startCount(state.task_id, state.itemtype, state.time);
       else {
          self.endCount(state.task_id, state.itemtype);
@@ -95,10 +97,11 @@ window.actualTime = new function() {
       const resume = Number(state.time) > 0;
       toggle.attr('action', state.active ? 'pause' : 'start').prop('disabled', !toggleEnabled)
          .attr('title', state.active ? labels.text_pause : (resume ? labels.text_restart : labels.text_start))
+         .attr('aria-label', state.active ? labels.text_pause : (resume ? labels.text_restart : labels.text_start))
          .css('background-color', toggleEnabled ? (state.active ? 'orange' : 'green') : 'gray')
          .html("<span><i class='fa-solid " + (state.active ? 'fa-pause' : (resume ? 'fa-forward' : 'fa-play')) + "' aria-hidden='true'></i></span>");
       const stopEnabled = allowed && !state.done && (state.active || Number(state.time) > 0);
-      stop.attr('action', 'end').prop('disabled', !stopEnabled).attr('title', labels.text_stop)
+      stop.attr('action', 'end').prop('disabled', !stopEnabled).attr('title', labels.text_stop).attr('aria-label', labels.text_stop)
          .css('background-color', stopEnabled ? 'red' : 'gray');
    }
    function renderPopup() {
@@ -117,7 +120,7 @@ window.actualTime = new function() {
          const id = key(state.task_id, state.itemtype);
          if (!id) return;
          const row = $('<li>', {class: 'mb-2'}).appendTo(list);
-         $('<a>', {href: state.link}).text(state.name + ' #' + state.parent_id + ' / ' + labels.text_task.replace('%d', state.task_id))
+         $('<a>', {href: state.link}).text(state.itemtype === 'PlanningExternalEvent' ? state.name + ' #' + state.task_id : state.name + ' #' + state.parent_id + ' / ' + labels.text_task.replace('%d', state.task_id))
             .on('click', function(e) {
                if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
                self.showTaskForm(e, state.task_id, state.itemtype);
@@ -222,6 +225,7 @@ window.actualTime = new function() {
                applyState(result.runtime, true);
                if (result.segment !== undefined) elements(task, type, 'segment').html(result.segment);
                if (action === 'end') updateCompletedForm(task, type, result);
+               if (type === 'PlanningExternalEvent' && window.GLPIPlanning && typeof window.GLPIPlanning.refresh === 'function') window.GLPIPlanning.refresh();
                active = active.filter(state => key(state.task_id, state.itemtype) !== id);
                if (result.runtime.own_active) active.push(result.runtime);
                renderPopup();
@@ -248,6 +252,7 @@ window.actualTime = new function() {
       const atGeneration = generation;
       const watch = new Set(counters.keys());
       $('[data-actualtime-task]').each(function() {
+         watch.add($(this).attr('data-actualtime-task'));
          if (!discovered.has(this)) {
             discovered.add(this);
             newTargets.add($(this).attr('data-actualtime-task'));

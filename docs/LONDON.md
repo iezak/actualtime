@@ -1,8 +1,75 @@
-# ActualTime London — ajuste de períodos anteriores
+# ActualTime London — cronômetros e apontamentos
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.6-london.5**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.7-london.1**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
+
+## Cronômetro em Assistência → Planejamentos
+
+A versão **3.2.7-london.1** inclui cronômetro nos eventos avulsos
+(`PlanningExternalEvent`), sem criar chamado ou tarefa auxiliar. Depois de salvar
+o evento, abra-o no calendário: a janela de edição mostra o tempo real, os
+controles **iniciar / pausar / retomar / finalizar** e os períodos encerrados.
+O tempo e os controles se atualizam por AJAX e são reconciliados entre abas.
+O aviso de atividades em execução abre o próprio evento.
+
+O responsável pelo evento controla o cronômetro, desde que possa editar o evento.
+Convidados e outros usuários só visualizam o tempo se o GLPI permitir a
+visualização desse planejamento. Eventos de fundo não recebem cronômetro.
+Os estados **Informação** e **A fazer** aceitam início; finalizar marca o evento
+como **Feito**. Para retomar após finalizar, reabra o estado do evento.
+O tempo real não altera as datas e horas agendadas.
+
+Eventos e tarefas diferentes podem permanecer ativos simultaneamente. O mesmo
+planejamento aceita apenas um cronômetro ativo. A configuração de bloquear
+início antes do horário agendado e a restrição a apontamentos em dias distintos
+continuam aplicadas. Concluir pelo formulário nativo, trocar o responsável ou
+converter em evento de fundo pausa o período ativo e preserva seu técnico.
+Excluir definitivamente o evento remove seus apontamentos e fontes de correção.
+
+Eventos recorrentes compartilham o mesmo ID e acumulam tempo **por série**;
+finalizar conclui a série. A interface informa esse comportamento.
+
+A edição manual usa a nova permissão **Modificar apontamentos dos planejamentos**,
+em **Administração → Perfis → ActualTime**. Essa permissão é independente dos
+controles normais do responsável e exige também acesso de edição ao evento.
+Quem receber essa permissão pode criar, corrigir ou excluir períodos, com o mesmo
+histórico, controle de conflitos e ajuste de sobreposições das tarefas.
+As alterações são registradas no histórico do próprio evento.
+
+Os eventos aparecem na lista de cronômetros em execução e seus períodos encerrados
+podem aparecer no filtro ActualTime do calendário. Os relatórios de chamados do plugin conservam seu escopo. Em consultas externas
+(Power BI), filtre `itemtype = 'TicketTask'` para tempo de chamados; os novos
+registros usam `itemtype = 'PlanningExternalEvent'`.
+Não há mudança no esquema do banco.
+
+### Atualização e conferência no espelho
+
+1. Atualize o plugin para esta versão e execute a atualização do plugin no GLPI,
+   caso a tela de plugins a solicite. Recarregue o navegador para carregar o JS novo.
+2. Crie um evento avulso em **Assistência → Planejamentos**, com você como
+   responsável, salve-o e abra-o novamente.
+3. Inicie, pause, retome e finalize. Confira o tempo, os períodos e o estado
+   **Feito**, preservando os horários agendados.
+4. Abra dois eventos e duas abas; confirme que cada cronômetro é independente.
+5. Confira com um convidado: ele pode ler o tempo quando tiver acesso ao evento,
+   sem receber os controles do responsável.
+6. Para corrigir horários, conceda a nova permissão no perfil apropriado e use
+   **Modify timers** no evento. Confira também a troca de responsável e a
+   conclusão pelo formulário nativo.
+
+Verificação automatizada (serviços do GLPI adaptados, sem banco de produção):
+
+    php tests/regression/planning-events.php
+    node tests/regression/planning.dom.cjs
+    node tests/regression/planning.browser.cjs
+
+O teste DOM/AJAX requer jsdom, jQuery e Bootstrap 5 e executa o JavaScript real
+com os métodos PHP reais, usando os serviços de GLPI adaptados. Ele inclui duas
+janelas DOM e aciona explicitamente o evento de storage entre elas.
+O teste de navegador requer Playwright/Chromium, jQuery e Bootstrap 5; `PHP_BINARY` e
+`BROWSER_EXECUTABLE_PATH` podem selecionar executáveis locais. A homologação
+completa em GLPI 10.0.26/MySQL continua necessária no espelho.
 
 ## Entrega atual
 
@@ -367,4 +434,3 @@ edição ativa, exclusão confirmada, tarefas simultâneas, conflitos entre abas
 rollback e formulário.
 O ambiente real com GLPI/MySQL, concorrência entre
 requisições e interação visual precisam ser validados no espelho.
-

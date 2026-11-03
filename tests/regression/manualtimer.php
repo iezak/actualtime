@@ -28,6 +28,8 @@ class Session
 {
     public static $user = 7;
     public static $right = true;
+    public static $messages = [];
+    public static function addMessageAfterRedirect($message, $force = false, $type = 0) { self::$messages[] = $message; }
     public static function getLoginUserID() { return self::$user; }
     public static function haveRight($name, $right) { return self::$right; }
     public static function getNewCSRFToken() { return 'test-token'; }
@@ -252,7 +254,10 @@ class MemoryDB
                 $actual = $row[$field] ?? null;
                 if ($actual === null) { return false; }
                 if ($value[0] === '<' && !($actual < $value[1])) { return false; }
-                if ($value[0] === '>' && !($actual > $value[1])) { return false; }
+                elseif ($value[0] === '>' && !($actual > $value[1])) { return false; }
+                elseif ($value[0] === '<=' && !($actual <= $value[1])) { return false; }
+                elseif ($value[0] === '>=' && !($actual >= $value[1])) { return false; }
+                elseif (!in_array($value[0], ['<', '>', '<=', '>='], true) && !in_array($actual, $value, true)) { return false; }
             } elseif (($row[$field] ?? null) != $value) {
                 return false;
             }

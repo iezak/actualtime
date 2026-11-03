@@ -12,7 +12,7 @@ if (!defined('GLPI_ROOT')) {
 
 class PluginActualtimeRuntime
 {
-    public const TASK_TYPES = [TicketTask::class, ChangeTask::class, ProblemTask::class, ProjectTask::class];
+    public const TASK_TYPES = [TicketTask::class, ChangeTask::class, ProblemTask::class, ProjectTask::class, PlanningExternalEvent::class];
 
     /** Read/update permission here is independent of the Modify timers right. */
     public static function taskContext($itemtype, $items_id, int $right = READ): array
@@ -28,19 +28,37 @@ class PluginActualtimeRuntime
         if (!$task->can((int)$items_id, $right) || !empty($task->fields['is_deleted'])) {
             throw new RuntimeException(__('You do not have permission to control this timer.', 'actualtime'));
         }
-        $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
-        $parent = getItemForItemtype($parent_type);
-        if (
-            !$parent || !$parent->can((int)$task->fields[$parent->getForeignKeyField()], READ)
-            || !empty($parent->fields['is_deleted'])
-        ) {
+        if ($task instanceof PlanningExternalEvent && !PluginActualtimePlanning::canRead($task)) {
+            throw new RuntimeException(__('You do not have permission to control this timer.', 'actualtime'));
+        }
+        $parent = self::parentFor($task);
+        if (!$parent->can($parent->getID(), READ) || !empty($parent->fields['is_deleted'])) {
             throw new RuntimeException(__('You do not have permission to control this timer.', 'actualtime'));
         }
         return ['task' => $task, 'parent' => $parent];
     }
 
+    /** Standalone planning events are their own context, rather than ITIL children. */
+    public static function parentFor(CommonDBTM $task): CommonDBTM
+    {
+        if ($task instanceof PlanningExternalEvent) {
+            return $task;
+        }
+        $type = $task->getType() === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
+        $parent = getItemForItemtype($type);
+        if (!$parent || !$parent->getFromDB((int)$task->fields[$parent->getForeignKeyField()])) {
+            throw new RuntimeException(__('Item not found'));
+        }
+        return $parent;
+    }
+
     public static function canControl(CommonDBTM $task): bool
     {
+        if ($task instanceof PlanningExternalEvent) {
+            return empty($task->fields['background'])
+                && (int)$task->fields['users_id'] === (int)Session::getLoginUserID()
+                && $task->can($task->getID(), UPDATE);
+        }
         return $task->can($task->getID(), UPDATE)
             && (isset($task->fields['users_id_tech'])
                 ? (int)$task->fields['users_id_tech'] === (int)Session::getLoginUserID()
@@ -53,7 +71,9 @@ class PluginActualtimeRuntime
         ['task' => $task, 'parent' => $parent] = self::taskContext($itemtype, $items_id);
         $active = PluginActualtimeTask::checkTimerActive($items_id, $itemtype);
         $own_active = PluginActualtimeTask::checkUser($items_id, $itemtype, Session::getLoginUserID());
-        $done = isset($task->fields['state']) ? (int)$task->fields['state'] !== 1 : false;
+        $done = $task instanceof PlanningExternalEvent
+            ? (int)$task->fields['state'] === Planning::DONE
+            : (isset($task->fields['state']) ? (int)$task->fields['state'] !== 1 : false);
         if ($itemtype === ProjectTask::class) {
             global $DB;
             foreach ($DB->request(['FROM' => ProjectState::getTable(), 'WHERE' => ['is_finished' => 1]]) as $state) {
@@ -66,11 +86,11 @@ class PluginActualtimeRuntime
         return [
             'task_id' => (int)$items_id, 'itemtype' => $itemtype,
             'parent_id' => (int)$parent->getID(), 'parent_type' => $parent->getType(),
-            'name' => $parent->getTypeName(1), 'link' => $parent->getFormURLWithID($parent->getID()),
+            'name' => $task instanceof PlanningExternalEvent ? (string)$task->fields['name'] : $parent->getTypeName(1), 'link' => $parent->getFormURLWithID($parent->getID()),
             'time' => max(0, PluginActualtimeTask::totalEndTime($items_id, $itemtype)),
             'active' => $active, 'own_active' => $own_active, 'done' => $done,
             'can_control' => self::canControl($task) && (!$active || $own_active),
-            'can_start' => !$done && !$disable['disable']
+            'can_start' => !$done && !$disable['disable'] && empty($task->fields['background'])
                 && (!($parent instanceof CommonITILObject) || (int)$parent->fields['status'] < CommonITILObject::SOLVED),
             'task_time' => (int)($task->fields['actiontime'] ?? $task->fields['effective_duration'] ?? 0),
         ];
@@ -113,7 +133,7 @@ class PluginActualtimeRuntime
             'text_warning' => __('Warning'), 'text_pause' => __('Pause timer', 'actualtime'),
             'text_start' => __('Start timer', 'actualtime'), 'text_restart' => __('Resume timer', 'actualtime'),
             'text_stop' => __('Stop timer', 'actualtime'), 'text_done' => __('Done'),
-            'text_running' => __('Running tasks (%d)', 'actualtime'),
+            'text_running' => __('Running timers (%d)', 'actualtime'),
             'text_task' => __('Task #%d', 'actualtime'),
             'text_error' => __('Could not update the timer. Refresh the task and try again.', 'actualtime'),
         ];
@@ -123,7 +143,7 @@ class PluginActualtimeRuntime
             $states[$state['itemtype'] . ':' . $state['task_id']] = $state;
         }
         foreach (array_slice($watch, 0, 100) as $key) {
-            if (!is_string($key) || !preg_match('/^(TicketTask|ChangeTask|ProblemTask|ProjectTask):([1-9][0-9]*)$/D', $key, $parts) || isset($states[$key])) {
+            if (!is_string($key) || !preg_match('/^(TicketTask|ChangeTask|ProblemTask|ProjectTask|PlanningExternalEvent):([1-9][0-9]*)$/D', $key, $parts) || isset($states[$key])) {
                 continue;
             }
             try {

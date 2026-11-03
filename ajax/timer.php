@@ -85,10 +85,11 @@ try {
     Html::displayRightError();
 }
 header("Content-Type: text/html; charset=UTF-8");
-echo "<div class='modal-header'><h4 class='modal-title'>" . __('Update of a task') . " #" . (int)$task_id . "</h4>";
+$title = $item instanceof PlanningExternalEvent ? $item->getTypeName(1) : __('Update of a task');
+echo "<div class='modal-header'><h4 class='modal-title'>" . htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . " #" . (int)$task_id . "</h4>";
 echo "<button type='button' class='btn-close' data-bs-dismiss='modal' aria-label='" . __s('Close') . "'></button></div>";
 echo "<div class='modal-body'><div class='center'>";
 echo "<a class='btn btn-outline-secondary' href='" . htmlspecialchars($parent->getFormURLWithID($parent->getID()), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "'>";
 echo "<i class='ti ti-eye'></i><span>" . __s("View this item in its context") . "</span></a></div><hr>";
-$item->showForm((int)$task_id, ['parent' => $parent]);
+$item->showForm((int)$task_id, $item instanceof PlanningExternalEvent ? [] : ['parent' => $parent]);
 echo "</div>";
