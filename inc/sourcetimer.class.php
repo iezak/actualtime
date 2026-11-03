@@ -40,6 +40,7 @@ class PluginActualtimeSourcetimer extends CommonDBTM
     public const CHANGE     = 2048;
     public const PROJECT    = 4096;
     public const PROBLEM    = 8192;
+    public const PLANNING   = 16384;
 
     /**
      * getRights
@@ -55,6 +56,7 @@ class PluginActualtimeSourcetimer extends CommonDBTM
                 self::CHANGE    => __('Modify changes', 'actualtime'),
                 self::PROJECT   => __('Modify projects', 'actualtime'),
                 self::PROBLEM   => __('Modify problems', 'actualtime'),
+                self::PLANNING  => __('Modify planning timers', 'actualtime'),
             ];
         }
         return [];
@@ -69,6 +71,8 @@ class PluginActualtimeSourcetimer extends CommonDBTM
     public static function checkItemtypeRight($itemtype): bool
     {
         switch ($itemtype) {
+            case PlanningExternalEvent::class:
+                return Session::haveRight(self::$rightname, self::PLANNING);
             case 'TicketTask':
                 return Session::haveRight(self::$rightname, self::TICKET);
             case 'ChangeTask':
@@ -106,6 +110,10 @@ class PluginActualtimeSourcetimer extends CommonDBTM
         $task = new $itemtype();
         if (!$task->can((int)$items_id, READ) || !empty($task->fields['is_deleted'])) {
             return false;
+        }
+
+        if ($task instanceof PlanningExternalEvent) {
+            return empty($task->fields['background']) && PluginActualtimePlanning::canRead($task) && $task->can((int)$items_id, UPDATE);
         }
 
         $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();

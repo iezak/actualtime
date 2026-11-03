@@ -199,6 +199,9 @@ class PluginActualtimeTask extends CommonDBTM
         $config = new PluginActualtimeConfig();
 
         switch ($item->getType()) {
+            case PlanningExternalEvent::class:
+                PluginActualtimePlanning::postForm($params);
+                break;
             case ChangeTask::class:
             case TicketTask::class:
             case ProblemTask::class:
@@ -682,6 +685,9 @@ JAVASCRIPT;
             if ($itemtype = self::getItemtype($user_id)) {
                 $task = new $itemtype();
                 if ($task->getFromDB($task_id)) {
+                    if ($task instanceof PlanningExternalEvent) {
+                        return $task->getID();
+                    }
                     if (is_a($task, CommonDBChild::class, true)) {
                         $parent = $task::$itemtype;
                     } else {
@@ -951,6 +957,9 @@ JAVASCRIPT;
 
         $config = new PluginActualtimeConfig();
         $itemtype = $item->getType();
+        if ($item instanceof PlanningExternalEvent) {
+            return PluginActualtimePlanning::preUpdate($item);
+        }
         if (!array_key_exists('plugin_actualtime', $item->input)) {
             if (array_key_exists('state', $item->input) && array_key_exists('state', $item->fields)) {
                 if ($item->fields['state'] != $item->input['state']) {
@@ -1187,7 +1196,8 @@ JAVASCRIPT;
             $query['WHERE'][] = ["users_id" => $who];
         }
         if ($whogroup > 0) {
-            $query['WHERE'][] = ["groups_id" => $whogroup];
+            $members = array_column(Group_User::getGroupUsers($whogroup), 'id');
+            $query['WHERE'][] = ['users_id' => $members ?: [0]];
         }
 
         foreach ($DB->request($query) as $id => $row) {
@@ -1200,27 +1210,25 @@ JAVASCRIPT;
             $interv[$key]["name"]             = self::getTypeName();
             $interv[$key]["content"]          = Html::timestampToString($row['actual_actiontime']);
 
-            $task = new $row['itemtype']();
-            $task->getFromDB($row['items_id']);
-            if (is_a($task, CommonDBChild::class, true)) {
-                $canupdate = $task->canUpdateItem();
-                $parent = getItemForItemtype($task::$itemtype);
-            } else {
-                $canupdate = $task->canUpdateITILItem();
-                $parent = getItemForItemtype($task->getItilObjectItemType());
+            try {
+                ['task' => $task, 'parent' => $parent] = PluginActualtimeRuntime::taskContext($row['itemtype'], $row['items_id']);
+            } catch (InvalidArgumentException | RuntimeException $error) {
+                unset($interv[$key]);
+                continue;
             }
-            $url_id = $task->fields[$parent->getForeignKeyField()];
+            $canupdate = $task->can($task->getID(), UPDATE);
+            $url_id = $parent->getID();
             if (!$options['genical']) {
                 $interv[$key]["url"] = $parent::getFormURLWithID($url_id);
             } else {
                 $interv[$key]["url"] = $CFG_GLPI["url_base"] . $parent::getFormURLWithID($url_id, false);
             }
-            $interv[$key]["name"] .= " - " . $parent::getTypeName(1) . " #" . $url_id . " - " . $row['items_id'];
+            $interv[$key]["name"] .= " - " . ($task instanceof PlanningExternalEvent ? $task->fields['name'] : $parent::getTypeName(1)) . " #" . $url_id . " - " . $row['items_id'];
             $interv[$key]["ajaxurl"] = $CFG_GLPI["root_doc"] . "/ajax/planning.php" .
             "?action=edit_event_form" .
             "&itemtype=" . $task->getType() .
             "&parentitemtype=" . $parent::getType() .
-            "&parentid=" . $task->fields[$parent->getForeignKeyField()] .
+            "&parentid=" . $parent->getID() .
             "&id=" . $row['items_id'] .
             "&url=" . $interv[$key]["url"];
 
@@ -1244,7 +1252,7 @@ JAVASCRIPT;
      */
     public static function displayPlanningItem(array $val, $who, $type = "", $complete = 0): string
     {
-        $html = "<strong>" . $val["name"] . "</strong>";
+        $html = "<strong>" . htmlspecialchars((string)$val["name"], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</strong>";
         $html .= "<br><strong>" . sprintf(__('By %s'), getUserName($val["users_id"])) . "</strong>";
         $html .= "<br><strong>" . __('Start date') . "</strong> : " . Html::convdatetime($val["begin"]);
         $html .= "<br><strong>" . __('End date') . "</strong> : " . Html::convdatetime($val["end"]);
@@ -1274,7 +1282,7 @@ JAVASCRIPT;
             if (isset($task->fields['begin'])) {
                 if ($task->fields['begin'] > date("Y-m-d H:i:s")) {
                     $result['disable'] = true;
-                    $result['message'] = sprintf(__("You cannot start a timer because the task was scheduled for %d.", 'actualtime'), $task->fields['begin']);
+                    $result['message'] = sprintf(__("You cannot start a timer before the scheduled start (%s).", 'actualtime'), $task->fields['begin']);
                     return $result;
                 }
             } elseif (isset($task->fields['real_start_date'])) {
@@ -1439,7 +1447,7 @@ JAVASCRIPT;
             return $result;
         }
         if (isset($task->fields['state'])) {
-            if ($task->getField('state') != 1) {
+            if ($task instanceof PlanningExternalEvent ? (int)$task->getField('state') === Planning::DONE : $task->getField('state') != 1) {
                 $result['message'] = __("Task completed.");
                 return $result;
             }
@@ -1463,6 +1471,10 @@ JAVASCRIPT;
             }
         }
 
+        if ($task instanceof PlanningExternalEvent && !PluginActualtimeRuntime::canControl($task)) {
+            $result['message'] = __('You do not have permission to control this timer.', 'actualtime');
+            return $result;
+        }
         if (isset($task->fields['users_id_tech'])) {
             if (Session::getLoginUserID() != $task->fields['users_id_tech']) {
                 $result['message'] = __("Technician not in charge of the task", 'gappextended');
@@ -1501,12 +1513,8 @@ JAVASCRIPT;
         }
 
         $timer_id = $DB->insertId();
-        if (is_a($task, CommonDBChild::class, true)) {
-            $parent = getItemForItemtype($task::$itemtype);
-        } else {
-            $parent = getItemForItemtype($task->getItilObjectItemType());
-        }
-        $parent_id = (int)$task->fields[$parent->getForeignKeyField()];
+        $parent = PluginActualtimeRuntime::parentFor($task);
+        $parent_id = (int)$parent->getID();
         $result = [
             'message'   => __("Timer started", 'actualtime'),
             'type'      => 'info',
@@ -1517,7 +1525,7 @@ JAVASCRIPT;
             'name'      => $parent::getTypeName(1),
         ];
 
-        if ($plugin->isActivated('gappextended')) {
+        if ($itemtype !== PlanningExternalEvent::class && $plugin->isActivated('gappextended')) {
             PluginGappextendedPush::sendActualtime(
                 $parent_id,
                 $task_id,
@@ -1594,7 +1602,7 @@ JAVASCRIPT;
                     'timer_id' => $timer_id,
                 ];
 
-                if ($plugin->isActivated('gappextended')) {
+                if ($itemtype !== PlanningExternalEvent::class && $plugin->isActivated('gappextended')) {
                     $task = new $itemtype();
                     $task->getFromDB($task_id);
                     if (is_a($task, CommonDBChild::class, true)) {
@@ -1698,7 +1706,7 @@ JAVASCRIPT;
                     $input['state'] = 2;
                 }
                 $input['plugin_actualtime'] = true;
-                if ($config->autoUpdateDuration()) {
+                if ($itemtype !== PlanningExternalEvent::class && $config->autoUpdateDuration()) {
                     $totalendtime = PluginActualtimeTask::totalEndTime($task_id, $itemtype);
                     $time_step = $CFG_GLPI["time_step"] * MINUTE_TIMESTAMP;
                     $ceil = ceil($totalendtime / ($time_step)) * ($time_step);
@@ -1721,7 +1729,7 @@ JAVASCRIPT;
                     'timer_id'  => $timer_id,
                 ];
 
-                if ($plugin->isActivated('gappextended')) {
+                if ($itemtype !== PlanningExternalEvent::class && $plugin->isActivated('gappextended')) {
                     if (is_a($task, CommonDBChild::class, true)) {
                         $parent = $task::$itemtype;
                     } else {
@@ -1759,9 +1767,11 @@ JAVASCRIPT;
             if (isset($task->fields['state'])) {
                 $input['state'] = 2;
             }
-            $input['pending'] = 0;
+            if ($itemtype !== PlanningExternalEvent::class) {
+                $input['pending'] = 0;
+            }
             $input['plugin_actualtime'] = true;
-            if ($config->autoUpdateDuration()) {
+            if ($itemtype !== PlanningExternalEvent::class && $config->autoUpdateDuration()) {
                 $totalendtime = PluginActualtimeTask::totalEndTime($task_id, $itemtype);
                 $time_step = $CFG_GLPI["time_step"] * MINUTE_TIMESTAMP;
                 $ceil = ceil($totalendtime / ($time_step)) * ($time_step);
@@ -1801,12 +1811,8 @@ JAVASCRIPT;
 
             $task = new $itemtype();
             if ($task->getFromDB($item_id)) {
-                if (is_a($task, CommonDBChild::class, true)) {
-                    $parent = getItemForItemtype($task::$itemtype);
-                } else {
-                    $parent = getItemForItemtype($task->getItilObjectItemType());
-                }
-                $item_id = $task->fields[$parent->getForeignKeyField()];
+                $parent = PluginActualtimeRuntime::parentFor($task);
+                $item_id = $parent->getID();
                 $itemtype = $parent::getType();
             }
 
@@ -1890,4 +1896,3 @@ JAVASCRIPT;
         $migration->dropTable($table);
     }
 }
-

@@ -52,6 +52,9 @@ class PluginActualtimeManualtimer
     /** No posted user ID can change the person to whom time is attributed. */
     public static function getTechnician(CommonDBTM $task): int
     {
+        if ($task instanceof PlanningExternalEvent) {
+            return (int)$task->fields['users_id'];
+        }
         return (int)(($task->fields['users_id_tech'] ?? 0) ?: Session::getLoginUserID());
     }
 
@@ -72,7 +75,7 @@ class PluginActualtimeManualtimer
     {
         global $DB;
         if (
-            !in_array($itemtype, [TicketTask::class, ChangeTask::class, ProblemTask::class, ProjectTask::class], true)
+            !in_array($itemtype, PluginActualtimeRuntime::TASK_TYPES, true)
             || filter_var($items_id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
         ) {
             throw new InvalidArgumentException(__('Invalid timer task.', 'actualtime'));
@@ -102,7 +105,7 @@ class PluginActualtimeManualtimer
     private static function updateDuration(CommonDBTM $task): void
     {
         global $CFG_GLPI;
-        if (!(new PluginActualtimeConfig())->autoUpdateDuration()) {
+        if ($task instanceof PlanningExternalEvent || !(new PluginActualtimeConfig())->autoUpdateDuration()) {
             return;
         }
         $step = max(1, (int)($CFG_GLPI['time_step'] ?? 1)) * MINUTE_TIMESTAMP;
@@ -185,13 +188,13 @@ class PluginActualtimeManualtimer
             $id = (int)$timer['id'];
             self::deleteTimerRow($itemtype, $items_id, $timer);
             self::updateDuration($task);
-            $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
-            $parent = new $parent_type();
+            $parent = PluginActualtimeRuntime::parentFor($task);
+            $parent_type = $parent->getType();
             $message = sprintf(
                 __('Deleted timer #%1$d, task #%2$d, technician #%3$d: %4$s - %5$s (%6$d seconds).', 'actualtime'),
                 $id, $items_id, $timer['users_id'], $timer['actual_begin'], $timer['actual_end'], $timer['actual_actiontime']
             );
-            if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+            if (!Log::history((int)$parent->getID(), $parent_type,
                 [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
                 throw new RuntimeException(__('Could not delete the timer.', 'actualtime'));
             }
@@ -310,8 +313,8 @@ class PluginActualtimeManualtimer
                     }
                 }
             }
-            $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
-            $parent = new $parent_type();
+            $parent = PluginActualtimeRuntime::parentFor($task);
+            $parent_type = $parent->getType();
             foreach ($deleted as $previous_id => $deletion) {
                 $before = $deletion['before'];
                 self::deleteTimerRow($itemtype, $items_id, $before);
@@ -320,7 +323,7 @@ class PluginActualtimeManualtimer
                     $previous_id, $deletion['replacing_id'], $before['actual_begin'], $before['actual_end'],
                     $before['users_id'], $before['actual_actiontime']
                 );
-                if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+                if (!Log::history((int)$parent->getID(), $parent_type,
                     [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
                     throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
                 }
@@ -357,7 +360,7 @@ class PluginActualtimeManualtimer
                 if (isset($change['replacing_id'])) {
                     $message .= ' ' . sprintf(__('Automatically adjusted to meet timer #%d.', 'actualtime'), $change['replacing_id']);
                 }
-                if (!Log::history((int)$task->fields[$parent->getForeignKeyField()], $parent_type,
+                if (!Log::history((int)$parent->getID(), $parent_type,
                     [0, '', $message], '', Log::HISTORY_LOG_SIMPLE_MESSAGE)) {
                     throw new RuntimeException(__('Could not save the timer changes.', 'actualtime'));
                 }
@@ -439,7 +442,7 @@ class PluginActualtimeManualtimer
             $timer_id = (int)$DB->insertId();
 
             $config = new PluginActualtimeConfig();
-            if ($config->autoUpdateDuration()) {
+            if (!($task instanceof PlanningExternalEvent) && $config->autoUpdateDuration()) {
                 $step = max(1, (int)($CFG_GLPI['time_step'] ?? 1)) * MINUTE_TIMESTAMP;
                 $total = PluginActualtimeTask::totalEndTime($items_id, $itemtype);
                 $field = array_key_exists('actiontime', $task->fields) ? 'actiontime' : 'effective_duration';
@@ -452,8 +455,8 @@ class PluginActualtimeManualtimer
                 }
             }
 
-            $parent_type = $itemtype === ProjectTask::class ? Project::class : $task->getItilObjectItemType();
-            $parent = new $parent_type();
+            $parent = PluginActualtimeRuntime::parentFor($task);
+            $parent_type = $parent->getType();
             $message = sprintf(
                 __('Manual timer #%1$d, task #%2$d, technician #%3$d: %4$s - %5$s (%6$d seconds).', 'actualtime'),
                 $timer_id,
@@ -464,7 +467,7 @@ class PluginActualtimeManualtimer
                 $interval['actual_actiontime']
             );
             if (!Log::history(
-                (int)$task->fields[$parent->getForeignKeyField()],
+                (int)$parent->getID(),
                 $parent_type,
                 [0, '', $message],
                 '',

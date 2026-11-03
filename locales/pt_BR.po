@@ -364,3 +364,25 @@ msgstr "Somente o usuário que iniciou a tarefa pode encerrá-la"
 #: inc/task.class.php:1702
 msgid "The task had not been initialized"
 msgstr "A tarefa não foi inicializada"
+
+#: inc/planning.class.php
+msgid "Save the event before starting a timer."
+msgstr "Salve o evento para iniciar o cronômetro."
+
+#: inc/planning.class.php
+msgid "Recurring events share the same accumulated time. Stopping completes the whole series."
+msgstr "Eventos recorrentes compartilham o tempo acumulado. Finalizar conclui toda a série."
+
+#: inc/planning.class.php
+msgid "Modify planning timers"
+msgstr "Modificar apontamentos dos planejamentos"
+
+#: inc/task.class.php
+#, php-format
+msgid "You cannot start a timer before the scheduled start (%s)."
+msgstr "Você só pode iniciar o cronômetro a partir do horário planejado (%s)."
+
+#: inc/runtime.class.php
+#, php-format
+msgid "Running timers (%d)"
+msgstr "Cronômetros em execução (%d)"

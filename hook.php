@@ -179,6 +179,10 @@ function plugin_actualtime_preSolutionAdd(ITILSolution $solution): void
  */
 function plugin_actualtime_item_purge(CommonDBTM $item): void
 {
+    if ($item instanceof PlanningExternalEvent) {
+        PluginActualtimePlanning::purge($item);
+        return;
+    }
     /** @var \DBmysql $DB */
     global $DB;
 

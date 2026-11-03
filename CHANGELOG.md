@@ -1,3 +1,14 @@
+## 3.2.7-london.1
+
+- Add timers to standalone events in Assistance → Planning, with pause/resume,
+  completion, period history and event-specific profile rights for corrections.
+- Preserve scheduled dates, event visibility, owner controls and simultaneous
+  task timers. Reconcile event controls/completion across browser tabs.
+- Include planning events in running timers and completed ActualTime calendar
+  entries; close active periods when an event is completed or reassigned.
+- Cover event actions, permission checks, correction/audit, cleanup and browser
+  interactions. No database schema change.
+
 # Actualtime
 
 ## [3.2.6-london.1] - 2026-10-28

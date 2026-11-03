@@ -276,7 +276,23 @@ JAVASCRIPT;
             ] + getEntitiesRestrictCriteria($projecttable),
         ]);
 
-        $union = new \QueryUnion([$queryticket, $querychange, $queryproblem, $queryproject]);
+        $eventtable = PlanningExternalEvent::getTable();
+        $queryevent = new \QuerySubQuery([
+            'SELECT' => [$atable . '.*', $eventtable . '.id AS planning_event_id'],
+            'FROM' => $atable,
+            'INNER JOIN' => [
+                $eventtable => ['ON' => [
+                    $eventtable => 'id', $atable => 'items_id',
+                    ['AND' => [$atable . '.itemtype' => PlanningExternalEvent::class]],
+                ]],
+            ],
+            'WHERE' => [
+                'NOT' => [$atable . '.actual_begin' => null],
+                $atable . '.actual_end' => null,
+                PlanningExternalEvent::getVisibilityCriteria(),
+            ] + getEntitiesRestrictCriteria($eventtable),
+        ]);
+        $union = new \QueryUnion([$queryticket, $querychange, $queryproblem, $queryproject, $queryevent]);
 
         $iteratortime = $DB->request(['FROM' => $union]);
         if ($iteratortime->count() > 0) {
@@ -291,14 +307,11 @@ JAVASCRIPT;
             $html .= "</tr>";
 
             foreach ($iteratortime as $key => $row) {
-                $task = new $row['itemtype']();
-                $task->getFromDB($row['items_id']);
-                if (is_a($task, CommonDBChild::class, true)) {
-                    $parent = getItemForItemtype($task::$itemtype);
-                } else {
-                    $parent = getItemForItemtype($task->getItilObjectItemType());
+                try {
+                    ['task' => $task, 'parent' => $parent] = PluginActualtimeRuntime::taskContext($row['itemtype'], $row['items_id']);
+                } catch (InvalidArgumentException | RuntimeException $error) {
+                    continue;
                 }
-                $parent->getFromDB($task->fields[$parent->getForeignKeyField()]);
                 $html .= "<tr class='tab_bg_2'>";
                 $user = new User();
                 $user->getFromDB($row['users_id']);
@@ -311,6 +324,12 @@ JAVASCRIPT;
                 }
                 $html .= "<td class='center'>";
                 $html .= "<ul class='list left'>";
+                if ($task instanceof PlanningExternalEvent) {
+                    $html .= "</ul></td><td class='center'><a href='" . htmlspecialchars($parent->getFormURLWithID($parent->getID()), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "'>";
+                    $html .= htmlspecialchars((string)$task->fields['name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . " #" . (int)$task->getID() . "</a></td>";
+                    $html .= "<td class='center'>" . Html::timestampToString(PluginActualtimeTask::totalEndTime($task->getID(), $task->getType())) . "</td></tr>";
+                    continue;
+                }
                 if (is_a($parent, CommonITILObject::class, true)) {
                     $item_link = getItemForItemtype($parent->getItemLinkClass());
                 } else {
