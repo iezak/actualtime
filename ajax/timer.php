@@ -66,6 +66,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     exit;
 }
 
+// Read the periods shown behind a planning correction iframe after a save/close.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['segments'])) {
+    header("Content-Type: application/json; charset=UTF-8");
+    try {
+        $type = $_GET['itemtype'] ?? null;
+        $task_id = $_GET['task_id'] ?? null;
+        if ($type !== PlanningExternalEvent::class) {
+            throw new InvalidArgumentException(__('Invalid timer task.', 'actualtime'));
+        }
+        PluginActualtimeRuntime::taskContext($type, $task_id);
+        echo json_encode(['segment' => PluginActualtimeTask::getSegment((int)$task_id, $type)]);
+    } catch (InvalidArgumentException | RuntimeException $error) {
+        Html::displayRightError();
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['footer'])) {
     header("Content-Type: application/json; charset=UTF-8");
     $raw = $_GET['watch'] ?? '';

@@ -1,8 +1,29 @@
 # ActualTime London — cronômetros e apontamentos
 
-Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.7-london.1**.
+Base: **ActualTime 3.2.0 / GLPI 10.0.x**. Versão desta entrega: **3.2.7-london.2**.
 Projeto original e créditos: [TICGAL/ActualTime](https://github.com/ticgal/actualtime).
 Mantida a licença AGPL v3 ou posterior.
+
+## Modify timers em janela flutuante
+
+A versão **3.2.7-london.2** abre **Modify timers** dos planejamentos na mesma
+janela flutuante com iframe usada pelo GLPI nos chamados. O planejamento continua
+aberto ao fundo e conserva os campos ainda não salvos. A edição e os redirecionamentos
+de inclusão, correção ou exclusão ficam dentro do iframe.
+
+Ao carregar novamente o editor ou fechá-lo, os cronômetros e o histórico visível
+são atualizados sem recarregar a página. Fechar devolve o foco ao botão do
+planejamento. Permissões e regras dos apontamentos continuam aplicadas.
+
+Para exercitar o modal com o código oficial do GLPI 10.0.26, aponte para seu
+`src/Ajax.php` (o mesmo diretório do GLPI deve conter `js/glpi_dialog.js`):
+
+    ACTUALTIME_GLPI_AJAX=/caminho/glpi/src/Ajax.php php tests/regression/planning-events.php
+    ACTUALTIME_GLPI_AJAX=/caminho/glpi/src/Ajax.php node tests/regression/planning.dom.cjs
+
+O teste usa o helper de iframe e o diálogo reais do GLPI, Bootstrap, jQuery,
+JavaScript e métodos PHP do plugin com serviços de GLPI adaptados. A submissão e a
+navegação do iframe são adaptadas no DOM; a conferência visual final ocorre no espelho.
 
 ## Cronômetro em Assistência → Planejamentos
 

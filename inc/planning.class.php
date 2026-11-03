@@ -72,7 +72,21 @@ class PluginActualtimePlanning
         }
         if (PluginActualtimeSourcetimer::canModify($type, $id)) {
             $url = Plugin::getWebDir('actualtime') . '/ajax/changetimer.php?itemtype=' . $type . '&task_id=' . $id;
-            echo "<p><a class='btn btn-outline-secondary' href='" . $escape($url) . "'>" . __s('Modify timers', 'actualtime') . "</a></p>";
+            $editor_id = "actualtime_planning_editor_{$id}_{$rand}";
+            $button_id = "actualtime_planning_modify_{$id}_{$rand}";
+            echo "<p><button type='button' class='btn btn-outline-secondary' id='{$button_id}' aria-haspopup='dialog' aria-controls='{$editor_id}'>" . __s('Modify timers', 'actualtime') . "</button></p>";
+            echo Ajax::createIframeModalWindow($editor_id, $url, [
+                'display' => false,
+                'reloadonclose' => false,
+                'dialog_class' => 'modal-xl',
+                'title' => __s('Modify timers', 'actualtime'),
+            ]);
+            echo Html::scriptBlock(<<<JAVASCRIPT
+$(function() {
+    window.actualTime.bindPlanningEditor('{$button_id}', '{$editor_id}', {$id});
+});
+JAVASCRIPT
+            );
         }
         echo "<div class='row text-center fw-bold'><div class='col-12 col-md-7'>" . __s('Start date') . "</div><div class='col-12 col-md-5'>" . __s('Partial actual duration', 'actualtime') . "</div></div>";
         echo "<div id='actualtime_segment_{$type}_{$id}_{$rand}'>" . PluginActualtimeTask::getSegment($id, $type) . "</div>";

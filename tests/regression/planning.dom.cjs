@@ -10,18 +10,22 @@ const errors = [];
 async function until(test, description) {
     const deadline = Date.now() + 8000;
     while (!test()) {
-        if (Date.now() > deadline) throw new Error('Timed out: ' + description + '; errors: ' + errors.join('; '));
+        if (Date.now() > deadline) throw new Error('Timed out: ' + description + '; errors: ' + errors.join('; ') + '; calls: ' + JSON.stringify(calls));
         await new Promise(resolve => setTimeout(resolve, 25));
     }
 }
 const button = (page, id, number = 1) => page.window.document.querySelector('[id^="actualtime_button_PlanningExternalEvent_' + id + '_' + number + '_"]');
 const counter = (page, id) => page.window.document.querySelector('[id^="actualtime_timer_PlanningExternalEvent_' + id + '_"]');
+async function clickTimer(page, id, number = 1) {
+    await until(() => !button(page, id, number).disabled && page.window.jQuery._data(button(page, id, number), 'events')?.click?.length, 'timer button ready: ' + id + '/' + number);
+    button(page, id, number).click();
+}
 async function load(url) {
     const virtualConsole = new VirtualConsole();
     virtualConsole.on('jsdomError', error => errors.push(error.message));
     const page = await JSDOM.fromURL(url, {runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole});
     pages.push(page);
-    await until(() => page.window.actualTime && counter(page, 11), 'load timer JS and event form');
+    await until(() => page.window.actualTime?.ajax_url && counter(page, 11), 'load timer JS and event form');
     return page;
 }
 async function refresh(page) {
@@ -44,22 +48,22 @@ async function refresh(page) {
         await until(() => /[1-9]/.test(counter(first, 10).textContent), 'elapsed display ticks');
         const second = await load(url);
         await until(() => button(second, 10).getAttribute('action') === 'pause', 'new tab recovers running time');
-        button(second, 11).click();
+        await clickTimer(second, 11);
         await until(() => button(second, 11).getAttribute('action') === 'pause', 'second event starts');
         // JSDOM windows have isolated localStorage; trigger the existing storage listener explicitly.
         first.window.dispatchEvent(new first.window.StorageEvent('storage', {key: 'actualtime:changed', newValue: 'test'}));
         await until(() => button(first, 11).getAttribute('action') === 'pause', 'other tab reconciles after storage event');
         assert.equal(backend('footer').active.length, 2, 'Two events run together');
-        button(second, 10).click();
+        await clickTimer(second, 10);
         await until(() => button(second, 10).getAttribute('action') === 'start', 'pause affects selected event');
         await refresh(first);
         await until(() => button(first, 10).getAttribute('action') === 'start', 'paused counter reconciles');
         assert.equal(button(first, 11).getAttribute('action'), 'pause', 'Other event remains active');
-        button(first, 10).click();
+        await clickTimer(first, 10);
         await until(() => button(first, 10).getAttribute('action') === 'pause', 'resume starts next period');
         await refresh(second);
         await until(() => button(second, 10).getAttribute('action') === 'pause', 'resume reconciles');
-        button(first, 10, 2).click();
+        await clickTimer(first, 10, 2);
         await until(() => first.window.document.querySelector('form select[name="state"]').value === '2', 'completion updates selected form');
         await refresh(second);
         await until(() => second.window.document.querySelector('form select[name="state"]').value === '2', 'completion updates other tab without reload');
@@ -74,7 +78,59 @@ async function refresh(page) {
         const guest = await load(url + '/?user=99');
         await until(() => guest.window.actualTime, 'guest page');
         assert.equal(guest.window.document.querySelectorAll('[id^="actualtime_button_"]').length, 0, 'Guest reads time without timer controls');
+        if (process.env.ACTUALTIME_GLPI_AJAX) {
+            // Native GLPI dialog + official iframe helper + Bootstrap, preserving unsaved fields.
+            first.window.actualTime.pressedButton(11, 'PlanningExternalEvent', 'pause');
+            await until(() => backend('footer').active.length === 0, 'pause event before correction');
+            const location = first.window.location.href;
+            first.window.glpi_html_dialog({id: 'planning_editor_parent', title: 'Planning', body: backend('form', {task_id: 11})});
+            await until(() => first.window.document.querySelector('#planning_editor_parent [id^="actualtime_planning_modify_"]'), 'native planning dialog');
+            const parent = first.window.document.getElementById('planning_editor_parent');
+            const trigger = parent.querySelector('[id^="actualtime_planning_modify_"]');
+            const editorId = trigger.getAttribute('aria-controls');
+            await until(() => first.window.bootstrap.Modal.getInstance(first.window.document.getElementById(editorId)), 'native iframe helper initialized');
+            await new Promise(resolve => setTimeout(resolve, 350));
+            const unsaved = first.window.document.createElement('input');unsaved.name = 'name';unsaved.value = 'Texto ainda não salvo';
+            parent.querySelector('form').appendChild(unsaved);
+            trigger.click();
+            const editor = first.window.document.getElementById(editorId);
+            const iframe = editor.querySelector('iframe');
+            let editForm, begin;
+            await until(() => {
+                if (iframe.contentDocument?.readyState !== 'complete') return false;
+                editForm = iframe.contentDocument.querySelector('form#form');
+                begin = editForm && Array.from(editForm.elements).find(field => field.name.startsWith('actual_begin['));
+                return begin;
+            }, 'correction form loads inside iframe');
+            assert.ok(parent.isConnected && parent.classList.contains('show'), 'Opening correction preserves the native planning dialog');
+            assert.equal(first.window.location.href, location, 'Top window does not navigate');
+            assert.ok(Number(editor.style.zIndex) > (parseInt(first.window.getComputedStyle(parent).zIndex, 10) || 1055), 'Editor is layered above the planner');
+            assert.equal(editForm.ownerDocument, iframe.contentDocument, 'Save form belongs to the iframe');
+            assert.notEqual(editForm.target, '_top', 'Editor does not submit into the parent window');
+            const date = new Date(begin.value.replace(' ', 'T') + 'Z');date.setUTCMinutes(date.getUTCMinutes() - 2);
+            const adjustedBegin = date.toISOString().slice(0, 19).replace('T', ' ');begin.value = adjustedBegin;
+            const values = new URLSearchParams();
+            for (const [name, value] of new iframe.contentWindow.FormData(editForm)) values.append(name, value);
+            values.append('update', '1');
+            const response = await fetch(new URL(editForm.getAttribute('action'), location), {method: 'POST', body: values});
+            assert.equal(response.status, 200, 'Correction saves and redirects inside the editor route');
+            await response.text();
+            // JSDOM does not implement native form navigation; reload only the iframe after the POST.
+            iframe.src = iframe.src + '&test_reload=1';
+            await until(() => parent.querySelector('[id^="actualtime_segment_"]').textContent.includes(adjustedBegin), 'Saved correction refreshes the parent history');
+            await until(() => counter(first, 11).textContent.includes('2min'), 'Saved correction refreshes the elapsed total');
+            assert.equal(unsaved.value, 'Texto ainda não salvo', 'Unsubmitted planning fields survive correction');
+            await until(() => editor.classList.contains('show'), 'editor shown');
+            await new Promise(resolve => setTimeout(resolve, 350));
+            editor.querySelector('.btn-close').click();
+            await until(() => !editor.classList.contains('show') && first.window.document.activeElement === trigger, 'Close returns focus to the planning button');
+            assert.ok(parent.isConnected && parent.classList.contains('show') && first.window.document.body.classList.contains('modal-open'), 'Close preserves the parent dialog and scrolling state');
+            assert.equal(first.window.location.href, location, 'Closing does not reload/navigate the page');
+            trigger.click();
+            await until(() => editor.classList.contains('show'), 'Editor can reopen');
+            assert.equal(first.window.document.querySelectorAll('#' + editorId).length, 1, 'Reopening does not duplicate the editor');
+        }
         assert.deepEqual(errors, [], 'No DOM script errors');
-        console.log('OK: DOM/AJAX planning controls; elapsed display, duplicate click, two events/windows, storage listener, pause/resume/completion, popup and guest.');
+        console.log('OK: DOM/AJAX planning controls; elapsed display, duplicate click, two events/windows, storage listener, pause/resume/completion, popup and guest.' + (process.env.ACTUALTIME_GLPI_AJAX ? ' Native GLPI modal: open, save, iframe reload, history/total refresh, close, unsaved fields and reopen.' : ''));
     } finally {for (const page of pages) page.window.close();await new Promise(resolve => server.close(resolve));}
 })().catch(error => {console.error(error);process.exitCode = 1;});
