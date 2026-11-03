@@ -1,3 +1,10 @@
+## 3.2.7-london.2
+
+- Open planning's Modify timers in GLPI's floating iframe modal, keeping the
+  planning dialog and unsaved fields in place.
+- Refresh accumulated time and period history after editor loads/closes; restore
+  the planning dialog's focus and scrolling when returning from the editor.
+
 ## 3.2.7-london.1
 
 - Add timers to standalone events in Assistance → Planning, with pause/resume,

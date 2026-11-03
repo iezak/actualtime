@@ -7,6 +7,14 @@ define('ACTUALTIME_FIXTURE_ONLY', true);
 define('PLUGIN_ACTUALTIME_NAME', 'ActualTime');
 require __DIR__ . '/manualtimer.php';
 require GLPI_ROOT . '/inc/planning.class.php';
+// The modal integration test loads GLPI's official Ajax.php. Other PHP tests
+// only exercise the surrounding form and do not emulate the native helper.
+if (getenv('ACTUALTIME_GLPI_AJAX')) {
+    require getenv('ACTUALTIME_GLPI_AJAX');
+} else {
+    class Ajax { public static function createIframeModalWindow($id, $url, $options = []) { return ''; } }
+}
+
 
 class Planning { public const INFO = 0; public const TODO = 1; public const DONE = 2; }
 class PlanningExternalEvent extends CommonDBTM {
@@ -68,6 +76,17 @@ if (($argv[1] ?? '') === '--fixture') {
         case 'action': $response = planningAction($input['action'], (int)$input['task_id']); break;
         case 'footer': $response = PluginActualtimeRuntime::footerData($input['watch'] ?? []); break;
         case 'form': $response = planningForm((int)$input['task_id']); break;
+        case 'segments':
+            PluginActualtimeRuntime::taskContext(PlanningExternalEvent::class, (int)$input['task_id']);
+            $response = ['segment' => PluginActualtimeTask::getSegment((int)$input['task_id'], PlanningExternalEvent::class)]; break;
+        case 'editor':
+            ob_start();
+            echo "<!doctype html><html><head><meta charset='utf-8'><script src='/assets/jquery.js'></script></head><body>";
+            (new PluginActualtimeSourcetimer())->modalForm(PlanningExternalEvent::class, (int)$input['task_id']);
+            echo '</body></html>';
+            $response = ob_get_clean(); break;
+        case 'edit':
+            $response = PluginActualtimeManualtimer::edit(PlanningExternalEvent::class, (int)$input['task_id'], $input['values']); break;
         case 'page': $response = "<!doctype html><html><head><meta charset='utf-8'><script src='/assets/jquery.js'></script></head><body>" . planningForm(10) . planningForm(11) . "<script src='/assets/bootstrap-adapter.js'></script><script src='/assets/runtime.js'></script></body></html>"; break;
         case 'dump': $response = ['timers' => $DB->timers, 'records' => CommonDBTM::$records]; break;
         default: throw new RuntimeException('Invalid fixture');

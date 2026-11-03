@@ -213,6 +213,47 @@ window.actualTime = new function() {
             if (request === modalRequest) $('#actualtime_modal_content').text(labels.text_error);
          });
    };
+   // Reuse GLPI's iframe modal without the data API that dismisses a parent dialog.
+   this.bindPlanningEditor = function(buttonId, modalId, task) {
+      const button = document.getElementById(buttonId);
+      const editor = document.getElementById(modalId);
+      if (!button || !editor || !key(task, 'PlanningExternalEvent')) return;
+      let parent = null;
+      let parentInstance = null;
+      const reloadPeriods = () => {
+         self.refresh();
+         return $.ajax({type: 'GET', url: self.ajax_url, dataType: 'json', cache: false,
+            data: {segments: 1, task_id: task, itemtype: 'PlanningExternalEvent'}})
+            .done(result => {
+               if (typeof result.segment === 'string') elements(task, 'PlanningExternalEvent', 'segment').html(result.segment);
+            });
+      };
+      $(button).on('click', event => {
+         event.preventDefault();
+         parent = button.closest('.modal.show');
+         parentInstance = parent ? bootstrap.Modal.getInstance(parent) : null;
+         // Bootstrap 5 supports one focus trap; restore the parent's trap on close.
+         if (parentInstance && parentInstance._focustrap) parentInstance._focustrap.deactivate();
+         const level = parent ? (parseInt(window.getComputedStyle(parent).zIndex, 10) || 1055) + 20 : 1055;
+         editor.style.zIndex = String(level);
+         bootstrap.Modal.getOrCreateInstance(editor).show();
+         const backdrops = document.querySelectorAll('.modal-backdrop');
+         const backdrop = backdrops[backdrops.length - 1];
+         if (backdrop) backdrop.style.zIndex = String(level - 5);
+      });
+      $('#iframe' + modalId).on('load.actualtime', function() {
+         if ($(this).attr('src')) reloadPeriods();
+      });
+      $(editor).on('hidden.bs.modal', () => {
+         reloadPeriods();
+         if (window.GLPIPlanning && typeof window.GLPIPlanning.refresh === 'function') window.GLPIPlanning.refresh();
+         if (parent && parent.isConnected && parent.classList.contains('show')) {
+            document.body.classList.add('modal-open');
+            if (parentInstance && parentInstance._config.focus && parentInstance._focustrap) parentInstance._focustrap.activate();
+            if (button.isConnected) button.focus();
+         }
+      });
+   };
    this.pressedButton = function(task, type, action) {
       const id = key(task, type);
       if (!id || pending.has(id) || !['start', 'pause', 'end'].includes(action)) return;
